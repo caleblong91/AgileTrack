@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 
-const Projects = () => {
+const Teams = () => {
   const [loading, setLoading] = useState(true);
-  const [projects, setProjects] = useState([]);
-  const [projectIntegrations, setProjectIntegrations] = useState({});
+  const [teams, setTeams] = useState([]);
+  const [teamIntegrations, setTeamIntegrations] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState(null);
 
@@ -19,66 +19,66 @@ const Projects = () => {
   });
 
   useEffect(() => {
-    // Fetch projects
-    const fetchProjects = async () => {
+    // Fetch teams
+    const fetchTeams = async () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await api.get('/projects');
-        const projectsData = response.data || [];
-        setProjects(projectsData);
+        const response = await api.get('/teams');
+        const teamsData = response.data || [];
+        setTeams(teamsData);
         
-        // Fetch integrations for each project
-        const integrationsPromises = projectsData.map(project => 
-          api.get(`/projects/${project.id}/integrations`)
+        // Fetch integrations for each team
+        const integrationsPromises = teamsData.map(team => 
+          api.get(`/teams/${team.id}/integrations`)
             .then(response => ({ 
-              projectId: project.id, 
+              teamId: team.id, 
               integrations: response.data || [] 
             }))
             .catch(error => ({ 
-              projectId: project.id, 
+              teamId: team.id, 
               integrations: [] 
             }))
         );
         
         const integrationsResults = await Promise.all(integrationsPromises);
         
-        // Create an object mapping project ID to integrations
+        // Create an object mapping team ID to integrations
         const integrationsMap = {};
         integrationsResults.forEach(result => {
-          integrationsMap[result.projectId] = result.integrations;
+          integrationsMap[result.teamId] = result.integrations;
         });
         
-        setProjectIntegrations(integrationsMap);
+        setTeamIntegrations(integrationsMap);
         setLoading(false);
       } catch (error) {
-        console.error('Error fetching projects:', error);
-        setError('Failed to load projects. Please try again later.');
-        setProjects([]);
+        console.error('Error fetching teams:', error);
+        setError('Failed to load teams. Please try again later.');
+        setTeams([]);
         setLoading(false);
       }
     };
     
-    fetchProjects();
+    fetchTeams();
   }, []);
 
-  // Filter projects based on search term
-  const filteredProjects = Array.isArray(projects) ? projects.filter(project =>
-    project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()))
+  // Filter teams based on search term
+  const filteredTeams = Array.isArray(teams) ? teams.filter(team =>
+    team.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (team.description && team.description.toLowerCase().includes(searchTerm.toLowerCase()))
   ) : [];
 
   // Get integration icon based on type
   const getIntegrationIcon = (type) => {
     const typeLC = type.toLowerCase();
     if (typeLC === 'github' || typeLC === 'gitlab') {
-      return 'bi-git';
+      return 'fe fe-git-branch';
     } else if (typeLC === 'jira') {
-      return 'bi-kanban';
+      return 'fe fe-layout';
     } else if (typeLC === 'trello') {
-      return 'bi-trello';
+      return 'fe fe-trello';
     } else {
-      return 'bi-plugin';
+      return 'fe fe-package';
     }
   };
   
@@ -97,6 +97,30 @@ const Projects = () => {
       return 'bg-secondary';
     }
   };
+  
+  // Get maturity level badge color
+  const getMaturityColor = (level) => {
+    switch (level) {
+      case 1: return 'bg-danger';
+      case 2: return 'bg-warning';
+      case 3: return 'bg-info';
+      case 4: return 'bg-primary';
+      case 5: return 'bg-success';
+      default: return 'bg-secondary';
+    }
+  };
+  
+  // Get maturity level text
+  const getMaturityText = (level) => {
+    switch (level) {
+      case 1: return 'Initial';
+      case 2: return 'Emerging';
+      case 3: return 'Defined';
+      case 4: return 'Measured';
+      case 5: return 'Optimizing';
+      default: return 'Unknown';
+    }
+  };
 
   if (loading) {
     return (
@@ -111,10 +135,10 @@ const Projects = () => {
   return (
     <div>
       <div className="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-        <h1 className="h2">Projects</h1>
+        <h1 className="h2">Teams</h1>
         <div className="btn-toolbar mb-2 mb-md-0">
-          <Link to="/projects/new" className="btn btn-sm btn-primary">
-            <i className="bi bi-plus-circle me-1"></i> New Project
+          <Link to="/teams/new" className="btn btn-sm btn-primary">
+            <i className="bi bi-plus-circle me-1"></i> New Team
           </Link>
         </div>
       </div>
@@ -131,12 +155,12 @@ const Projects = () => {
         <div className="col-md-6">
           <div className="input-group">
             <span className="input-group-text">
-              <i className="bi bi-search"></i>
+              <i className="fe fe-search"></i>
             </span>
             <input
               type="text"
               className="form-control"
-              placeholder="Search projects..."
+              placeholder="Search teams..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -144,40 +168,45 @@ const Projects = () => {
         </div>
       </div>
 
-      {/* Projects list */}
+      {/* Teams list */}
       <div className="row">
-        {filteredProjects.length === 0 ? (
+        {filteredTeams.length === 0 ? (
           <div className="col-12 text-center my-5">
             <div className="card shadow-sm p-5">
-              <h4 className="text-muted">No projects found</h4>
-              <p className="mb-4">Create your first project to get started tracking your team's metrics</p>
+              <h4 className="text-muted">No teams found</h4>
+              <p className="mb-4">Create your first team to get started tracking your agile maturity</p>
               <div>
-                <Link to="/projects/new" className="btn btn-primary">
-                  <i className="bi bi-plus-circle me-1"></i> Create New Project
+                <Link to="/teams/new" className="btn btn-primary">
+                  <i className="fe fe-plus-circle me-1"></i> Create New Team
                 </Link>
               </div>
             </div>
           </div>
         ) : (
-          filteredProjects.map(project => (
-            <div key={project.id} className="col-md-6 col-lg-4 mb-4">
+          filteredTeams.map(team => (
+            <div key={team.id} className="col-md-6 col-lg-4 mb-4">
               <div className="card h-100 shadow-sm">
                 <div className="card-body">
                   <div className="d-flex justify-content-between align-items-center mb-3">
-                    <h5 className="card-title mb-0">{project.name}</h5>
-                    <span className={`badge ${project.active ? 'bg-success' : 'bg-secondary'} rounded-pill`}>
-                      {project.active ? 'Active' : 'Inactive'}
+                    <h5 className="card-title mb-0">{team.name}</h5>
+                    <span className={`badge ${getMaturityColor(team.maturity_level)} rounded-pill`}>
+                      Level {team.maturity_level}: {getMaturityText(team.maturity_level)}
                     </span>
                   </div>
                   <p className="card-text text-muted">
-                    {project.description || 'No description provided'}
+                    {team.description || 'No description provided'}
                   </p>
+                  <div className="mt-3">
+                    <span className={`badge ${team.active ? 'bg-success' : 'bg-secondary'} me-2`}>
+                      {team.active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
                 </div>
                 <div className="card-footer bg-white border-top-0">
                   <div className="d-flex justify-content-between align-items-center">
                     <div>
-                      {projectIntegrations[project.id] && projectIntegrations[project.id].length > 0 ? (
-                        projectIntegrations[project.id].slice(0, 3).map((integration, idx) => (
+                      {teamIntegrations[team.id] && teamIntegrations[team.id].length > 0 ? (
+                        teamIntegrations[team.id].slice(0, 3).map((integration, idx) => (
                           <span key={idx} className={`badge ${getIntegrationColor(integration.type)} rounded-pill me-1`}>
                             <i className={`bi ${getIntegrationIcon(integration.type)} me-1`}></i> {integration.type}
                           </span>
@@ -188,7 +217,7 @@ const Projects = () => {
                         </span>
                       )}
                     </div>
-                    <Link to={`/projects/${project.id}`} className="btn btn-sm btn-outline-primary">
+                    <Link to={`/teams/${team.id}`} className="btn btn-sm btn-outline-primary">
                       View Details
                     </Link>
                   </div>
@@ -202,4 +231,4 @@ const Projects = () => {
   );
 };
 
-export default Projects; 
+export default Teams; 

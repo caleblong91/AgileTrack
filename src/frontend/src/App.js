@@ -8,8 +8,10 @@ import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages
 import Dashboard from './pages/Dashboard';
-import Projects from './pages/Projects';
-import ProjectDetail from './pages/ProjectDetail';
+// Import for Projects removed - keep this comment to avoid breaking dependencies
+import Teams from './pages/Teams';
+import TeamDetail from './pages/TeamDetail';
+import NewTeam from './pages/NewTeam';
 import Integrations from './pages/Integrations';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
@@ -30,8 +32,9 @@ const AuthenticatedLayout = () => {
           <div className="col-md-9 col-lg-10 ms-sm-auto px-md-4 py-4">
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/projects" element={<Projects />} />
-              <Route path="/projects/:id" element={<ProjectDetail />} />
+              <Route path="/teams" element={<Teams />} />
+              <Route path="/teams/new" element={<NewTeam />} />
+              <Route path="/teams/:id" element={<TeamDetail />} />
               <Route path="/integrations" element={<Integrations />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>

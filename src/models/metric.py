@@ -13,10 +13,14 @@ class Metric(Base):
     value = Column(Float)
     raw_data = Column(JSON)  # Store raw data as JSON
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    project_id = Column(Integer, ForeignKey("projects.id"))
+    
+    # Foreign Keys
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     sprint_id = Column(Integer, ForeignKey("sprints.id"), nullable=True)
     
     # Relationships
+    team = relationship("Team", back_populates="metrics")
     project = relationship("Project", back_populates="metrics")
     sprint = relationship("Sprint", back_populates="metrics")
     
@@ -32,9 +36,13 @@ class Sprint(Base):
     end_date = Column(DateTime(timezone=True))
     goal = Column(String)
     status = Column(String)  # active, completed, etc.
+    
+    # Foreign Keys
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
     
     # Relationships
+    team = relationship("Team", back_populates="sprints")
     project = relationship("Project", back_populates="sprints")
     metrics = relationship("Metric", back_populates="sprint")
     
@@ -48,9 +56,13 @@ class TeamMember(Base):
     name = Column(String, nullable=False)
     email = Column(String)
     role = Column(String)
-    project_id = Column(Integer, ForeignKey("projects.id"))
+    
+    # Foreign Keys
+    team_id = Column(Integer, ForeignKey("teams.id"))
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     
     # Relationships
+    team = relationship("Team", back_populates="team_members")
     project = relationship("Project", back_populates="team_members")
     
     def __repr__(self):

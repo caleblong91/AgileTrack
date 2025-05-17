@@ -4,8 +4,8 @@ from sqlalchemy.sql import func
 
 from src.backend.database import Base
 
-class Project(Base):
-    __tablename__ = "projects"
+class Team(Base):
+    __tablename__ = "teams"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
@@ -14,15 +14,15 @@ class Project(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     active = Column(Boolean, default=True)
     
-    # Foreign Keys
-    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    # Team metrics and maturity level
+    maturity_level = Column(Integer, default=1)  # 1-5 scale for team maturity
     
     # Relationships - using strings to avoid circular imports
-    team = relationship("Team", back_populates="projects")
-    integrations = relationship("Integration", back_populates="project")
-    metrics = relationship("Metric", back_populates="project")
-    sprints = relationship("Sprint", back_populates="project")
-    team_members = relationship("TeamMember", back_populates="project")
+    projects = relationship("Project", back_populates="team")
+    integrations = relationship("Integration", back_populates="team")
+    metrics = relationship("Metric", back_populates="team")
+    team_members = relationship("TeamMember", back_populates="team")
+    sprints = relationship("Sprint", back_populates="team")
     
     def __repr__(self):
-        return f"<Project {self.name}>" 
+        return f"<Team {self.name}>" 

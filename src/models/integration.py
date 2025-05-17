@@ -18,9 +18,13 @@ class Integration(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_sync = Column(DateTime(timezone=True))
     active = Column(Boolean, default=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
+    
+    # Foreign Keys
+    team_id = Column(Integer, ForeignKey("teams.id"))
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)  # Optional, for backward compatibility
     
     # Relationships
+    team = relationship("Team", back_populates="integrations")
     project = relationship("Project", back_populates="integrations")
     
     def __repr__(self):

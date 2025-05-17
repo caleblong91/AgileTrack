@@ -5,6 +5,7 @@ import api from '../services/api';
 const Integrations = () => {
   const { integrations: contextIntegrations, addIntegration } = useAuth();
   const [integrations, setIntegrations] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [currentIntegration, setCurrentIntegration] = useState(null);
@@ -13,6 +14,7 @@ const Integrations = () => {
     name: '',
     apiKey: '',
     repository: '',
+    teamId: ''  // Add team ID field
   });
   const [editIntegration, setEditIntegration] = useState({
     id: null,
@@ -20,8 +22,10 @@ const Integrations = () => {
     name: '',
     apiKey: '',
     repository: '',
+    teamId: ''  // Add team ID field
   });
   const [loading, setLoading] = useState(false);
+  const [teamsLoading, setTeamsLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
   const [repositories, setRepositories] = useState([]);
   const [fetchingRepos, setFetchingRepos] = useState(false);
@@ -29,7 +33,36 @@ const Integrations = () => {
   // Load integrations from AuthContext when component mounts
   useEffect(() => {
     setIntegrations(contextIntegrations);
+    // Fetch available teams when component mounts
+    fetchTeams();
   }, [contextIntegrations]);
+
+  // Fetch teams from the API
+  const fetchTeams = async () => {
+    setTeamsLoading(true);
+    try {
+      const response = await api.get('/teams');
+      if (response.data) {
+        setTeams(response.data);
+        
+        // If we have teams, set the first one as default for new integrations
+        if (response.data.length > 0) {
+          setNewIntegration(prev => ({ 
+            ...prev, 
+            teamId: response.data[0].id.toString() 
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching teams:', error);
+      setMessage({
+        text: 'Failed to fetch teams: ' + (error.response?.data?.detail || 'Unknown error'),
+        type: 'danger'
+      });
+    } finally {
+      setTeamsLoading(false);
+    }
+  };
 
   // Function to fetch GitHub repositories
   const fetchGitHubRepositories = async (apiKey) => {
@@ -90,16 +123,18 @@ const Integrations = () => {
     }
   };
 
-  const handleAddIntegration = (e) => {
+  const handleAddIntegration = async (e) => {
     e.preventDefault();
     setLoading(true);
     
     try {
-      // Add integration through the context
+      // Create integration data object
       const integrationData = {
         type: newIntegration.type,
-        name: newIntegration.name,
-        apiKey: newIntegration.apiKey
+        name: newIntegration.name || `${newIntegration.type} Integration`,
+        api_key: newIntegration.apiKey,
+        team_id: parseInt(newIntegration.teamId),  // Send team ID
+        project_id: parseInt(newIntegration.teamId)  // Also send as project_id for backend compatibility
       };
       
       // Add config for GitHub integrations
@@ -109,30 +144,60 @@ const Integrations = () => {
         };
       }
       
-      addIntegration(integrationData);
+      console.log('Creating integration with data:', {...integrationData, api_key: 'MASKED'});
+      
+      // Call the API to create the integration
+      const response = await api.post('/integrations', integrationData);
+      
+      if (response.data) {
+        // Add team_id to the response data if it's missing
+        const newIntegration = {
+          ...response.data,
+          team_id: parseInt(integrationData.team_id)
+        };
+        
+        // Add to local state
+        setIntegrations([...integrations, newIntegration]);
+        
+        setMessage({
+          text: 'Integration added successfully',
+          type: 'success'
+        });
+      }
       
       setShowAddModal(false);
-      setNewIntegration({ type: 'github', name: '', apiKey: '', repository: '' });
+      setNewIntegration({ 
+        type: 'github', 
+        name: '', 
+        apiKey: '', 
+        repository: '', 
+        teamId: teams.length > 0 ? teams[0].id.toString() : '' 
+      });
       setRepositories([]);
-      setLoading(false);
     } catch (error) {
       console.error('Error adding integration:', error);
       setMessage({ 
         text: 'Failed to add integration: ' + (error.response?.data?.detail || 'Unknown error'), 
         type: 'danger' 
       });
+    } finally {
       setLoading(false);
     }
   };
 
   const handleEditClick = (integration) => {
     setCurrentIntegration(integration);
+    
+    // Get the team ID from either team_id or project_id
+    const teamId = integration.team_id || integration.project_id;
+    
     setEditIntegration({
       id: integration.id,
       type: integration.type,
       name: integration.name,
       apiKey: '************', // Mask the API key for security
-      repository: integration.config?.repository || '' // Get repository from config if available
+      repository: integration.config?.repository || '', // Get repository from config if available
+      teamId: teamId ? teamId.toString() : ''
     });
     
     // If we have an existing repository, pre-fetch repositories list if possible
@@ -149,21 +214,24 @@ const Integrations = () => {
     setLoading(true);
     
     try {
-      // Only update if the API key has been changed (not still masked)
+      // Create update data object with all required fields from the model
       const updateData = {
         name: editIntegration.name,
         type: editIntegration.type,
-        project_id: currentIntegration.project_id,
+        project_id: parseInt(editIntegration.teamId),  // Backend still expects project_id, not team_id
+        api_key: editIntegration.apiKey !== '************' 
+          ? editIntegration.apiKey 
+          : currentIntegration.api_key || 'placeholder_key', // Backend requires api_key field
         config: {
           ...currentIntegration.config, // Preserve existing config
           repository: editIntegration.repository // Add/update repository
-        }
+        },
+        // Include optional fields with null values to satisfy the model
+        api_url: currentIntegration.api_url || null,
+        username: currentIntegration.username || null
       };
       
-      // Only include API key if it's been changed (not masked)
-      if (editIntegration.apiKey !== '************') {
-        updateData.api_key = editIntegration.apiKey;
-      }
+      console.log('Sending update data:', {...updateData, api_key: updateData.api_key ? 'MASKED' : 'EMPTY'});
       
       const response = await api.put(`/integrations/${editIntegration.id}`, updateData);
       
@@ -174,6 +242,7 @@ const Integrations = () => {
               ...integration, 
               name: editIntegration.name, 
               type: editIntegration.type,
+              team_id: parseInt(editIntegration.teamId),
               config: {
                 ...integration.config,
                 repository: editIntegration.repository
@@ -191,8 +260,15 @@ const Integrations = () => {
       setRepositories([]);
     } catch (error) {
       console.error('Error updating integration:', error);
+      
+      // More detailed error logging for debugging
+      if (error.response) {
+        console.error('Error response data:', error.response.data);
+        console.error('Error response status:', error.response.status);
+      }
+      
       setMessage({ 
-        text: 'Failed to update integration: ' + (error.response?.data?.detail || 'Unknown error'), 
+        text: 'Failed to update integration: ' + (error.response?.data?.detail || error.message || 'Unknown error'), 
         type: 'danger' 
       });
     } finally {
@@ -394,47 +470,77 @@ const Integrations = () => {
                   <tr>
                     <th>Name</th>
                     <th>Type</th>
+                    <th>Team</th>
                     <th>Status</th>
                     <th>Last Sync</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {integrations.map(integration => (
-                    <tr key={integration.id}>
-                      <td>{integration.name}</td>
-                      <td>{integration.type}</td>
-                      <td>
-                        <span className={`badge ${integration.active ? 'bg-success' : 'bg-secondary'}`}>
-                          {integration.active ? 'Connected' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td>{integration.last_sync || 'Never'}</td>
-                      <td>
-                        <button 
-                          className="btn btn-sm btn-outline-primary me-2"
-                          onClick={() => handleSyncIntegration(integration)}
-                          disabled={loading}
-                        >
-                          Sync
-                        </button>
-                        <button 
-                          className="btn btn-sm btn-outline-secondary me-2"
-                          onClick={() => handleEditClick(integration)}
-                          disabled={loading}
-                        >
-                          Edit
-                        </button>
-                        <button 
-                          className="btn btn-sm btn-outline-danger"
-                          onClick={() => handleRemoveIntegration(integration)}
-                          disabled={loading}
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {integrations.map(integration => {
+                    // Find the team name for this integration
+                    const teamId = integration.team_id || integration.project_id;
+                    const team = teams.find(t => t.id === teamId);
+                    const teamName = team ? team.name : 'Unknown';
+                    
+                    return (
+                      <tr key={integration.id}>
+                        <td>{integration.name}</td>
+                        <td>{integration.type}</td>
+                        <td>{teamName}</td>
+                        <td>
+                          <span className={`badge ${integration.active ? 'bg-success' : 'bg-secondary'}`}>
+                            {integration.active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td>{integration.last_sync || 'Never'}</td>
+                        <td>
+                          <button 
+                            className="btn btn-sm btn-outline-primary me-2"
+                            onClick={() => handleSyncIntegration(integration)}
+                            disabled={loading}
+                          >
+                            Sync
+                          </button>
+                          <button 
+                            className="btn btn-sm btn-outline-secondary me-2"
+                            onClick={() => handleEditClick(integration)}
+                            disabled={loading}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn btn-sm btn-outline-danger me-1"
+                            onClick={() => {
+                              if (window.confirm(`Are you sure you want to delete the integration "${integration.name}"?`)) {
+                                api.delete(`/integrations/${integration.id}`)
+                                  .then(() => {
+                                    // Remove from state
+                                    setIntegrations(integrations.filter(i => i.id !== integration.id));
+                                    alert(`Integration "${integration.name}" deleted successfully`);
+                                  })
+                                  .catch(error => {
+                                    console.error('Error deleting integration:', error);
+                                    alert(`Error deleting integration: ${error.response?.data?.detail || error.message}`);
+                                  });
+                              }
+                            }}
+                          >
+                            <i className="fe fe-trash-2"></i> Delete
+                          </button>
+                          {integration.config && !integration.config.repository && integration.type.toLowerCase() === 'github' && (
+                            <button
+                              className="btn btn-sm btn-warning"
+                              onClick={() => handleEditClick(integration)}
+                              title="This GitHub integration needs a repository to be configured"
+                            >
+                              <i className="fe fe-alert-triangle"></i> Configure
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -460,6 +566,35 @@ const Integrations = () => {
                 </div>
                 <div className="modal-body">
                   <form onSubmit={handleAddIntegration}>
+                    {/* Team Selection */}
+                    <div className="mb-3">
+                      <label htmlFor="teamSelection" className="form-label">Team</label>
+                      {teamsLoading ? (
+                        <div className="d-flex align-items-center">
+                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                          <span>Loading teams...</span>
+                        </div>
+                      ) : teams.length > 0 ? (
+                        <select 
+                          id="teamSelection" 
+                          className="form-select"
+                          value={newIntegration.teamId}
+                          onChange={(e) => setNewIntegration({...newIntegration, teamId: e.target.value})}
+                          disabled={loading}
+                          required
+                        >
+                          <option value="">Select a team</option>
+                          {teams.map(team => (
+                            <option key={team.id} value={team.id}>{team.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="alert alert-warning">
+                          No teams found. Please <a href="/teams/new">create a team</a> first.
+                        </div>
+                      )}
+                    </div>
+                    
                     <div className="mb-3">
                       <label htmlFor="integrationType" className="form-label">Integration Type</label>
                       <select 
@@ -564,7 +699,7 @@ const Integrations = () => {
                       <button 
                         type="submit" 
                         className="btn btn-primary"
-                        disabled={loading}
+                        disabled={loading || teams.length === 0}
                       >
                         {loading ? 'Connecting...' : 'Connect'}
                       </button>
@@ -600,6 +735,35 @@ const Integrations = () => {
                 </div>
                 <div className="modal-body">
                   <form onSubmit={handleEditSubmit}>
+                    {/* Team Selection */}
+                    <div className="mb-3">
+                      <label htmlFor="editTeamSelection" className="form-label">Team</label>
+                      {teamsLoading ? (
+                        <div className="d-flex align-items-center">
+                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                          <span>Loading teams...</span>
+                        </div>
+                      ) : teams.length > 0 ? (
+                        <select 
+                          id="editTeamSelection" 
+                          className="form-select"
+                          value={editIntegration.teamId}
+                          onChange={(e) => setEditIntegration({...editIntegration, teamId: e.target.value})}
+                          disabled={loading}
+                          required
+                        >
+                          <option value="">Select a team</option>
+                          {teams.map(team => (
+                            <option key={team.id} value={team.id}>{team.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="alert alert-warning">
+                          No teams found. Please create a team first.
+                        </div>
+                      )}
+                    </div>
+                    
                     <div className="mb-3">
                       <label htmlFor="editIntegrationType" className="form-label">Integration Type</label>
                       <select 
@@ -705,7 +869,7 @@ const Integrations = () => {
                       <button 
                         type="submit" 
                         className="btn btn-primary"
-                        disabled={loading}
+                        disabled={loading || teams.length === 0}
                       >
                         {loading ? 'Saving...' : 'Save Changes'}
                       </button>

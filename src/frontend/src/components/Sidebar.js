@@ -15,61 +15,61 @@ const Sidebar = () => {
         <ul className="nav flex-column mt-3">
           <li className="nav-item">
             <Link to="/" className={`nav-link ${isActive('/')}`}>
-              <i className="fe fe-home"></i>
+              <i className="fe fe-home me-2"></i>
               Dashboard
             </Link>
           </li>
           <li className="nav-item">
-            <Link to="/projects" className={`nav-link ${isActive('/projects')}`}>
-              <i className="fe fe-folder"></i>
-              Projects
+            <Link to="/teams" className={`nav-link ${isActive('/teams')}`}>
+              <i className="fe fe-users me-2"></i>
+              Teams
             </Link>
           </li>
           <li className="nav-item">
             <Link to="/integrations" className={`nav-link ${isActive('/integrations')}`}>
-              <i className="fe fe-link"></i>
+              <i className="fe fe-link me-2"></i>
               Integrations
             </Link>
           </li>
         </ul>
         
-        <h6 className="sidebar-heading">
+        <h6 className="sidebar-heading mt-3">
           <span>Reports</span>
         </h6>
         <ul className="nav flex-column">
           <li className="nav-item">
             <a className="nav-link" href="#">
-              <i className="fe fe-bar-chart-2"></i>
+              <i className="fe fe-bar-chart-2 me-2"></i>
               Velocity
             </a>
           </li>
           <li className="nav-item">
             <a className="nav-link" href="#">
-              <i className="fe fe-calendar"></i>
+              <i className="fe fe-calendar me-2"></i>
               Sprint Burndown
             </a>
           </li>
           <li className="nav-item">
             <a className="nav-link" href="#">
-              <i className="fe fe-award"></i>
+              <i className="fe fe-award me-2"></i>
               Team Performance
             </a>
           </li>
           <li className="nav-item">
             <a className="nav-link" href="#">
-              <i className="fe fe-trending-up"></i>
+              <i className="fe fe-trending-up me-2"></i>
               Agile Maturity
             </a>
           </li>
         </ul>
         
-        <h6 className="sidebar-heading">
+        <h6 className="sidebar-heading mt-3">
           <span>Administration</span>
         </h6>
         <ul className="nav flex-column">
           <li className="nav-item">
             <Link to="/settings" className={`nav-link ${isActive('/settings')}`}>
-              <i className="fe fe-settings"></i>
+              <i className="fe fe-settings me-2"></i>
               Settings
             </Link>
           </li>
