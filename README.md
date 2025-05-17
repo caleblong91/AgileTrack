@@ -10,6 +10,29 @@ A comprehensive platform for tracking and improving agile maturity across develo
 - **Actionable Insights**: Get recommendations for process improvements
 - **Beautiful Dashboards**: Visualize metrics with modern UI
 - **Secure Authentication**: JWT-based authentication with password hashing
+- **High Performance**: Local caching and optimized API calls for fast dashboard loading
+
+## Recent Updates
+
+The following improvements were recently added to enhance the application:
+
+### Integration Fixes
+- Fixed timezone handling in GitHub integration to correctly compare dates
+- Resolved Pydantic model validation issues for integration responses
+- Fixed CORS configuration to allow proper cross-origin requests
+
+### Dashboard Enhancements
+- Implemented real-time metrics display from GitHub, Jira, and Trello integrations
+- Added integration metrics table showing key performance indicators
+- Enhanced visualization of agile maturity metrics with dynamic charts
+- Added smart analysis of metrics to provide actionable improvement suggestions
+
+### Performance Optimizations
+- Added persistent browser caching with localStorage to improve load times on refresh
+- Implemented parallel API calls for faster data loading
+- Added section-based loading indicators for better user feedback
+- Integrated a force refresh mechanism to update all data when needed
+- Added background data refreshing for real-time updates
 
 ## Tech Stack
 

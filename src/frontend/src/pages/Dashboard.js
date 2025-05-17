@@ -7,8 +7,69 @@ import { Chart, registerables } from 'chart.js';
 // Register Chart.js components
 Chart.register(...registerables);
 
+// Create a persistent cache using localStorage
+const localStorageCache = {
+  get: function(key) {
+    try {
+      const cachedData = localStorage.getItem(`agiletrack_${key}`);
+      if (!cachedData) return null;
+      
+      const { data, timestamp } = JSON.parse(cachedData);
+      
+      // Check if data is less than 5 minutes old
+      if (Date.now() - timestamp < 5 * 60 * 1000) {
+        console.log(`Using cached data for ${key} from localStorage`);
+        return data;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error retrieving from cache:', error);
+      return null;
+    }
+  },
+  set: function(key, value) {
+    try {
+      const cacheObject = {
+        data: value,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(`agiletrack_${key}`, JSON.stringify(cacheObject));
+    } catch (error) {
+      console.error('Error setting cache:', error);
+    }
+  },
+  clear: function() {
+    // Clear all agiletrack caches
+    Object.keys(localStorage)
+      .filter(key => key.startsWith('agiletrack_'))
+      .forEach(key => localStorage.removeItem(key));
+  }
+};
+
+// Create a simple in-memory cache for the current session
+const metricsCache = {
+  data: {},
+  timestamps: {},
+  set: function(key, value) {
+    this.data[key] = value;
+    this.timestamps[key] = Date.now();
+  },
+  get: function(key) {
+    // Check if data exists and is less than 5 minutes old
+    if (this.data[key] && Date.now() - this.timestamps[key] < 5 * 60 * 1000) {
+      return this.data[key];
+    }
+    return null;
+  }
+};
+
 const Dashboard = () => {
   const [loading, setLoading] = useState(true);
+  const [sectionLoading, setSectionLoading] = useState({
+    projects: true,
+    integrations: true,
+    metrics: true
+  });
   const [projects, setProjects] = useState([]);
   const [integrations, setIntegrations] = useState([]);
   const [metrics, setMetrics] = useState({});
@@ -32,74 +93,269 @@ const Dashboard = () => {
     }
   });
 
-  useEffect(() => {
-    // Fetch data
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        
-        // Fetch real data from API
+  // Fetch projects
+  const fetchProjects = async (forceRefresh = false) => {
+    try {
+      setSectionLoading(prev => ({ ...prev, projects: true }));
+      
+      // Try to get projects from localStorage cache
+      const cacheKey = 'projects';
+      let projectsData = null;
+      
+      if (!forceRefresh) {
+        projectsData = localStorageCache.get(cacheKey);
+      }
+      
+      // If no cache or force refresh, fetch from API
+      if (!projectsData) {
+        console.log('Fetching projects from API');
         const projectsResponse = await api.get('/projects');
-        const projectsData = projectsResponse.data;
-        setProjects(projectsData);
+        projectsData = projectsResponse.data;
         
-        // Fetch integrations
+        // Save to localStorage cache
+        localStorageCache.set(cacheKey, projectsData);
+      }
+      
+      setProjects(projectsData);
+      
+      // Update summary data related to projects
+      setSummary(prev => ({
+        ...prev,
+        totalProjects: projectsData.length,
+        activeProjects: projectsData.filter(p => p.active).length,
+      }));
+      
+      return projectsData;
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+      return [];
+    } finally {
+      setSectionLoading(prev => ({ ...prev, projects: false }));
+    }
+  };
+
+  // Fetch integrations
+  const fetchIntegrations = async (forceRefresh = false) => {
+    try {
+      setSectionLoading(prev => ({ ...prev, integrations: true }));
+      
+      // Try to get integrations from localStorage cache
+      const cacheKey = 'integrations';
+      let integrationsData = null;
+      
+      if (!forceRefresh) {
+        integrationsData = localStorageCache.get(cacheKey);
+      }
+      
+      // If no cache or force refresh, fetch from API
+      if (!integrationsData) {
+        console.log('Fetching integrations from API');
         const integrationsResponse = await api.get('/integrations');
-        const integrationsData = integrationsResponse.data;
-        setIntegrations(integrationsData);
+        integrationsData = integrationsResponse.data;
         
-        // Fetch metrics for each integration
-        const metricsData = {};
-        let totalVelocity = 0;
-        let velocityCount = 0;
+        // Save to localStorage cache
+        localStorageCache.set(cacheKey, integrationsData);
+      }
+      
+      setIntegrations(integrationsData);
+      
+      // Update summary data related to integrations
+      setSummary(prev => ({
+        ...prev,
+        totalIntegrations: integrationsData.length,
+      }));
+      
+      return integrationsData;
+    } catch (error) {
+      console.error('Error fetching integrations:', error);
+      return [];
+    } finally {
+      setSectionLoading(prev => ({ ...prev, integrations: false }));
+    }
+  };
+
+  // Fetch metrics for all integrations in parallel
+  const fetchMetrics = async (integrationsData, forceRefresh = false) => {
+    try {
+      setSectionLoading(prev => ({ ...prev, metrics: true }));
+      
+      if (!integrationsData || integrationsData.length === 0) {
+        return {};
+      }
+      
+      // Prepare promises for all integration metrics
+      const metricPromises = integrationsData.map(integration => {
+        // Check localStorage cache first
+        const cacheKey = `metrics_${integration.id}`;
+        let cachedData = null;
         
-        for (const integration of integrationsData) {
-          try {
-            const metricResponse = await api.post(`/integrations/${integration.id}/metrics`, {
-              days: 30
-            });
-            
-            if (metricResponse.data && !metricResponse.data.metrics.error) {
-              metricsData[integration.id] = metricResponse.data.metrics;
-              
-              // Calculate velocity for GitHub PRs or Jira completed stories
-              if (integration.type === 'github' && metricResponse.data.metrics.pr_count) {
-                totalVelocity += metricResponse.data.metrics.pr_count;
-                velocityCount++;
-              } else if (integration.type === 'jira' && metricResponse.data.metrics.completed_story_points) {
-                totalVelocity += metricResponse.data.metrics.completed_story_points;
-                velocityCount++;
-              }
-            }
-          } catch (error) {
-            console.error(`Error fetching metrics for integration ${integration.id}:`, error);
+        if (!forceRefresh) {
+          cachedData = localStorageCache.get(cacheKey);
+          
+          // Also check in-memory cache for the current session
+          if (!cachedData) {
+            cachedData = metricsCache.get(cacheKey);
           }
         }
         
-        setMetrics(metricsData);
+        if (cachedData) {
+          return Promise.resolve({ 
+            integrationId: integration.id, 
+            data: cachedData 
+          });
+        }
         
-        // Calculate summary data
-        const avgVelocity = velocityCount > 0 ? Math.round(totalVelocity / velocityCount) : 0;
+        // Fetch from API if not in cache
+        console.log(`Fetching metrics for integration ${integration.id} from API`);
+        return api.post(`/integrations/${integration.id}/metrics`, { days: 30 })
+          .then(response => {
+            // Only cache successful responses without errors
+            if (response.data && !response.data.metrics.error) {
+              const metricsData = response.data.metrics;
+              
+              // Save to both caches
+              metricsCache.set(cacheKey, metricsData);
+              localStorageCache.set(cacheKey, metricsData);
+              
+              return { 
+                integrationId: integration.id, 
+                data: metricsData 
+              };
+            }
+            return { 
+              integrationId: integration.id, 
+              data: response.data.metrics 
+            };
+          })
+          .catch(error => {
+            console.error(`Error fetching metrics for integration ${integration.id}:`, error);
+            return { 
+              integrationId: integration.id, 
+              data: null 
+            };
+          });
+      });
+      
+      // Wait for all promises to resolve
+      const results = await Promise.all(metricPromises);
+      
+      // Convert to object format
+      const metricsData = {};
+      results.forEach(result => {
+        if (result.data && !result.data.error) {
+          metricsData[result.integrationId] = result.data;
+        }
+      });
+      
+      setMetrics(metricsData);
+      
+      // Cache the complete metrics set
+      localStorageCache.set('all_metrics', metricsData);
+      
+      // Calculate summary data from metrics
+      calculateSummaryFromMetrics(metricsData);
+      
+      return metricsData;
+    } catch (error) {
+      console.error('Error fetching metrics:', error);
+      return {};
+    } finally {
+      setSectionLoading(prev => ({ ...prev, metrics: false }));
+    }
+  };
+
+  // Calculate summary values from metrics data
+  const calculateSummaryFromMetrics = (metricsData) => {
+    let totalVelocity = 0;
+    let velocityCount = 0;
+    
+    // Find the corresponding integration for each metric
+    Object.entries(metricsData).forEach(([integrationId, metricSet]) => {
+      const integration = integrations.find(i => i.id === parseInt(integrationId));
+      if (!integration) return;
+      
+      // Calculate velocity
+      if (integration.type === 'github' && metricSet.pr_count) {
+        totalVelocity += metricSet.pr_count;
+        velocityCount++;
+      } else if (integration.type === 'jira' && metricSet.completed_story_points) {
+        totalVelocity += metricSet.completed_story_points;
+        velocityCount++;
+      }
+    });
+    
+    const avgVelocity = velocityCount > 0 ? Math.round(totalVelocity / velocityCount) : 0;
+    const agileMaturity = calculateAgileMaturity(metricsData);
+    
+    setSummary(prev => ({
+      ...prev,
+      avgAgileMaturity: agileMaturity,
+      teamVelocity: avgVelocity
+    }));
+    
+    // Cache the summary data
+    localStorageCache.set('dashboard_summary', {
+      avgAgileMaturity: agileMaturity,
+      teamVelocity: avgVelocity
+    });
+  };
+
+  // Force refresh all data
+  const forceRefreshAll = async () => {
+    setLoading(true);
+    
+    try {
+      // Clear relevant localStorage cache entries
+      localStorageCache.clear();
+      
+      // Reload all data from API
+      const integrationsData = await fetchIntegrations(true);
+      await fetchProjects(true);
+      await fetchMetrics(integrationsData, true);
+    } catch (error) {
+      console.error('Error during force refresh:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      
+      try {
+        // Try to get cached summary first for instant display
+        const cachedSummary = localStorageCache.get('dashboard_summary');
+        if (cachedSummary) {
+          setSummary(prev => ({
+            ...prev,
+            ...cachedSummary
+          }));
+        }
         
-        setSummary({
-          totalProjects: projectsData.length,
-          activeProjects: projectsData.filter(p => p.active).length,
-          totalIntegrations: integrationsData.length,
-          avgAgileMaturity: calculateAgileMaturity(metricsData),
-          teamVelocity: avgVelocity
-        });
+        // Try to get cached metrics
+        const cachedMetrics = localStorageCache.get('all_metrics');
+        if (cachedMetrics) {
+          setMetrics(cachedMetrics);
+        }
         
-        setLoading(false);
+        // Load projects and integrations in parallel
+        const [projectsData, integrationsData] = await Promise.all([
+          fetchProjects(),
+          fetchIntegrations()
+        ]);
+        
+        // Load metrics once we have the integrations
+        // Only force refresh metrics if we don't have cached data
+        await fetchMetrics(integrationsData, !cachedMetrics);
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        console.error('Error loading dashboard data:', error);
         
-        // Set default/mock data in case of error
-        const mockProjects = [
+        // Set fallback data
+        setProjects([
           { id: 1, name: 'Sample Project 1', active: true },
           { id: 2, name: 'Sample Project 2', active: false },
-        ];
-        
-        setProjects(mockProjects);
+        ]);
         
         setSummary({
           totalProjects: 2,
@@ -108,12 +364,22 @@ const Dashboard = () => {
           avgAgileMaturity: 65,
           teamVelocity: 0
         });
-        
+      } finally {
         setLoading(false);
       }
     };
     
-    fetchData();
+    loadData();
+    
+    // Set up a refresh interval for metrics
+    const refreshTimer = setInterval(() => {
+      if (integrations.length > 0) {
+        console.log('Running background refresh of metrics...');
+        fetchMetrics(integrations);
+      }
+    }, 5 * 60 * 1000); // Refresh every 5 minutes
+    
+    return () => clearInterval(refreshTimer);
   }, []);
 
   // Helper function to calculate agile maturity based on metrics
@@ -413,6 +679,20 @@ const Dashboard = () => {
   const improvementMetrics = getMetricsToImprove();
   const suggestions = getSuggestions();
 
+  // Helper function to render a loading indicator for a specific section
+  const renderSectionLoading = (section) => {
+    if (!sectionLoading[section]) return null;
+    
+    return (
+      <div className="section-loading">
+        <div className="spinner-border spinner-border-sm text-primary me-2" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+        <span className="small text-muted">Loading...</span>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="d-flex justify-content-center align-items-center" style={{ height: '70vh' }}>
@@ -428,6 +708,20 @@ const Dashboard = () => {
       <div className="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
         <h1 className="h2">Dashboard</h1>
         <div className="btn-toolbar mb-2 mb-md-0">
+          <button 
+            className="btn btn-sm btn-outline-secondary me-2" 
+            onClick={() => fetchMetrics(integrations)}
+            disabled={sectionLoading.metrics}
+          >
+            {sectionLoading.metrics ? 'Refreshing...' : 'Refresh Metrics'}
+          </button>
+          <button 
+            className="btn btn-sm btn-outline-danger me-2" 
+            onClick={forceRefreshAll}
+            disabled={loading || Object.values(sectionLoading).some(val => val)}
+          >
+            {loading ? 'Refreshing...' : 'Force Refresh All'}
+          </button>
           <Link to="/projects/new" className="btn btn-sm btn-primary">
             <i className="fe fe-plus me-1"></i> New Project
           </Link>
@@ -444,6 +738,7 @@ const Dashboard = () => {
               <p className="text-muted">
                 <small>{summary.activeProjects} active</small>
               </p>
+              {renderSectionLoading('projects')}
             </div>
           </div>
         </div>
@@ -455,6 +750,7 @@ const Dashboard = () => {
               <p className="text-muted">
                 <small>Across all projects</small>
               </p>
+              {renderSectionLoading('integrations')}
             </div>
           </div>
         </div>
@@ -466,6 +762,7 @@ const Dashboard = () => {
               <p className="text-muted">
                 <small>Average across projects</small>
               </p>
+              {renderSectionLoading('metrics')}
             </div>
           </div>
         </div>
@@ -477,6 +774,7 @@ const Dashboard = () => {
               <p className="text-muted">
                 <small>PRs/Issues per month (avg)</small>
               </p>
+              {renderSectionLoading('metrics')}
             </div>
           </div>
         </div>
@@ -487,8 +785,9 @@ const Dashboard = () => {
         <div className="row mb-4">
           <div className="col-md-12">
             <div className="card">
-              <div className="card-header">
-                <h5>Integration Metrics Summary</h5>
+              <div className="card-header d-flex justify-content-between align-items-center">
+                <h5 className="mb-0">Integration Metrics Summary</h5>
+                {renderSectionLoading('metrics')}
               </div>
               <div className="card-body">
                 <div className="table-responsive">
@@ -534,8 +833,9 @@ const Dashboard = () => {
       <div className="row mb-4">
         <div className="col-md-8">
           <div className="card">
-            <div className="card-header">
-              <h5>Agile Maturity Overview</h5>
+            <div className="card-header d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">Agile Maturity Overview</h5>
+              {renderSectionLoading('metrics')}
             </div>
             <div className="card-body">
               <div style={{ height: '300px' }}>
@@ -546,8 +846,9 @@ const Dashboard = () => {
         </div>
         <div className="col-md-4">
           <div className="card">
-            <div className="card-header">
-              <h5>Recent Projects</h5>
+            <div className="card-header d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">Recent Projects</h5>
+              {renderSectionLoading('projects')}
             </div>
             <div className="card-body">
               <ul className="list-group list-group-flush">
@@ -574,8 +875,9 @@ const Dashboard = () => {
       <div className="row">
         <div className="col-md-6">
           <div className="card">
-            <div className="card-header">
-              <h5>Top Metrics to Improve</h5>
+            <div className="card-header d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">Top Metrics to Improve</h5>
+              {renderSectionLoading('metrics')}
             </div>
             <div className="card-body">
               <ul className="list-group list-group-flush">
@@ -617,6 +919,20 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+      
+      {/* Add some CSS for the section loading indicators */}
+      <style jsx>{`
+        .section-loading {
+          position: absolute;
+          top: 10px;
+          right: 10px;
+          display: flex;
+          align-items: center;
+        }
+        .card-header {
+          position: relative;
+        }
+      `}</style>
     </div>
   );
 };
