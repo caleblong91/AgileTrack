@@ -1,6 +1,6 @@
 import os
 from github import Github
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 class GitHubIntegration:
@@ -24,7 +24,7 @@ class GitHubIntegration:
         if not self.repository:
             raise ValueError("Repository not set")
             
-        since = datetime.now() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         pull_requests = self.repository.get_pulls(state=state, sort="created", direction="desc")
         
         pr_data = []
@@ -54,7 +54,7 @@ class GitHubIntegration:
         if not self.repository:
             raise ValueError("Repository not set")
             
-        since = datetime.now() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         commits = self.repository.get_commits(since=since)
         
         commit_data = []
@@ -78,7 +78,7 @@ class GitHubIntegration:
         if not self.repository:
             raise ValueError("Repository not set")
             
-        since = datetime.now() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         issues = self.repository.get_issues(state=state, sort="created", direction="desc")
         
         issue_data = []
