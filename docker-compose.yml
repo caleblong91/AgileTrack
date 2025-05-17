@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/agiletrack
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./:/app
+      - /app/src/frontend  # Exclude frontend directory from volume mounting
+    networks:
+      - agiletrack-network
+
+  # Frontend UI
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - agiletrack-network
+
+  # PostgreSQL Database
+  db:
+    image: postgres:13
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=agiletrack
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agiletrack-network
+
+  # Redis for caching and background tasks
+  redis:
+    image: redis:6-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - agiletrack-network
+
+  # Optional: Celery worker for background tasks
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: always
+    command: celery -A src.backend.tasks worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/agiletrack
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+      - backend
+    volumes:
+      - ./:/app
+      - /app/src/frontend
+    networks:
+      - agiletrack-network
+
+networks:
+  agiletrack-network:
+
+volumes:
+  postgres_data:
+  redis_data: 

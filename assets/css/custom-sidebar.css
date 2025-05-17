@@ -1,0 +1,101 @@
+/* Custom Sidebar Styling */
+
+#sidebar {
+  background-color: #ffffff;
+  border-right: 1px solid #eaeaea;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  padding-top: 0;
+  min-height: calc(100vh - 56px);
+}
+
+#sidebar .nav-link {
+  color: #4a5568;
+  font-weight: 500;
+  padding: 0.8rem 1.2rem;
+  border-radius: 4px;
+  margin: 0.2rem 0.8rem;
+  transition: all 0.2s ease;
+}
+
+#sidebar .nav-link:hover {
+  background-color: #f7fafc;
+  color: #2d3748;
+}
+
+#sidebar .nav-link.active {
+  background-color: #ebf4ff;
+  color: #3182ce;
+}
+
+#sidebar .nav-link i {
+  font-size: 1.1rem;
+  margin-right: 0.75rem;
+  opacity: 0.8;
+}
+
+#sidebar .sidebar-heading {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #a0aec0;
+  padding: 1rem 1.5rem 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+#sidebar .nav-item {
+  margin-bottom: 0.25rem;
+}
+
+#sidebar ul.nav {
+  padding-bottom: 1rem;
+}
+
+/* Add extra spacing at the top of sidebar */
+#sidebar .nav:first-of-type {
+  padding-top: 1rem;
+}
+
+/* Adjust main content spacing */
+.col-md-9.col-lg-10.ms-sm-auto {
+  padding-top: 1.5rem;
+}
+
+/* Additional ScriptDrop inspired styles */
+body {
+  background-color: #f9fafb;
+}
+
+/* Navbar styling to match the clean look */
+.navbar {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  padding: 0.5rem 1rem;
+}
+
+/* Card styling */
+.card {
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.card-header {
+  background-color: #ffffff;
+  border-bottom: 1px solid #edf2f7;
+  padding: 1rem 1.25rem;
+}
+
+/* Tables */
+.table {
+  color: #4a5568;
+}
+
+.table thead th {
+  background-color: #f7fafc;
+  border-bottom: 1px solid #edf2f7;
+  color: #718096;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+} 

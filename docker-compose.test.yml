@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Backend tests
+  backend-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: pytest --cov=src tests/
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@test-db:5432/agiletrack_test
+      - REDIS_URL=redis://test-redis:6379/0
+    depends_on:
+      - test-db
+      - test-redis
+    volumes:
+      - ./:/app
+      - /app/src/frontend
+    networks:
+      - test-network
+
+  # Frontend tests
+  frontend-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    command: cd /app && npm test -- --watchAll=false --coverage
+    volumes:
+      - ./src/frontend:/app
+    networks:
+      - test-network
+
+  # Test PostgreSQL
+  test-db:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=agiletrack_test
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    tmpfs:
+      - /var/lib/postgresql/data  # Use tmpfs for faster testing and no persistence
+    networks:
+      - test-network
+
+  # Test Redis
+  test-redis:
+    image: redis:6-alpine
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+    networks:
+      - test-network
+
+networks:
+  test-network: 
