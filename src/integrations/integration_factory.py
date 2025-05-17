@@ -20,20 +20,32 @@ class IntegrationFactory:
         if not config:
             config = {}
             
-        if integration_type.lower() == "github":
+        # Standardize integration type to lowercase for case-insensitive comparison
+        integration_type = integration_type.lower()
+            
+        if integration_type == "github":
+            # Check for different token field names
+            api_token = config.get("api_token") or config.get("token") or config.get("api_key")
+            
+            # Get repository from config
+            repository = config.get("repository")
+            
+            # Print debug info
+            print(f"Creating GitHub integration with repository: {repository} and token: {'*' * 8}")
+            
             return GitHubIntegration(
-                api_token=config.get("api_token"),
-                repository=config.get("repository")
+                api_token=api_token,
+                repository=repository
             )
-        elif integration_type.lower() == "jira":
+        elif integration_type == "jira":
             return JiraIntegration(
                 server=config.get("server"),
                 username=config.get("username"),
-                api_token=config.get("api_token")
+                api_token=config.get("api_token") or config.get("token") or config.get("api_key")
             )
-        elif integration_type.lower() == "trello":
+        elif integration_type == "trello":
             return TrelloIntegration(
-                api_key=config.get("api_key"),
+                api_key=config.get("api_key") or config.get("api_token"),
                 api_secret=config.get("api_secret"),
                 token=config.get("token")
             )

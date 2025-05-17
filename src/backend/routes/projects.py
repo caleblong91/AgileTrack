@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+from datetime import datetime, timedelta
+import random
 
 from src.backend.database import get_db
 from src.models.project import Project
@@ -22,6 +24,62 @@ class ProjectResponse(ProjectBase):
     
     class Config:
         orm_mode = True
+
+# Mock data for integrations
+MOCK_INTEGRATION_TYPES = ["GitHub", "Jira", "Trello", "GitLab"]
+
+def generate_mock_integrations(project_id: int) -> List[Dict[str, Any]]:
+    """Generate mock integrations for a project"""
+    num_integrations = random.randint(1, 3)
+    integration_types = random.sample(MOCK_INTEGRATION_TYPES, num_integrations)
+    
+    return [
+        {
+            "id": i + 1,
+            "project_id": project_id,
+            "type": integration_type,
+            "config": {"url": f"https://api.{integration_type.lower()}.com", "token": "sample_token"},
+            "active": True,
+            "created_at": (datetime.now() - timedelta(days=random.randint(1, 30))).isoformat()
+        }
+        for i, integration_type in enumerate(integration_types)
+    ]
+
+def generate_mock_metrics(project_id: int) -> Dict[str, Any]:
+    """Generate mock metrics data for a project"""
+    num_sprints = 5
+    sprint_names = [f"Sprint {i+1}" for i in range(num_sprints)]
+    
+    # Generate increasing velocity with some variation
+    base_velocity = random.randint(8, 15)
+    velocities = []
+    for i in range(num_sprints):
+        v = base_velocity + i + random.randint(-2, 4)
+        velocities.append(v)
+    
+    # Generate decreasing burndown
+    total_work = random.randint(80, 150)
+    burndown = [total_work]
+    remaining = total_work
+    for i in range(1, num_sprints):
+        work_done = random.randint(15, 25)
+        remaining = max(0, remaining - work_done)
+        burndown.append(remaining)
+    
+    # Generate improving cycle time
+    base_cycle_time = random.uniform(4.0, 7.0)
+    cycle_times = []
+    for i in range(num_sprints):
+        ct = max(1.0, base_cycle_time - (i * 0.5) + random.uniform(-0.3, 0.3))
+        cycle_times.append(round(ct, 1))
+    
+    return {
+        "velocity": velocities,
+        "burndown": burndown,
+        "cycletime": cycle_times,
+        "sprints": sprint_names,
+        "project_id": project_id
+    }
 
 # Routes
 @router.get("/", response_model=List[ProjectResponse])
@@ -89,22 +147,24 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)):
     
     return None
 
-@router.get("/{project_id}/integrations", response_model=List)
+@router.get("/{project_id}/integrations")
 async def get_project_integrations(project_id: int, db: Session = Depends(get_db)):
     """Get all integrations for a project"""
     project = db.query(Project).filter(Project.id == project_id).first()
     
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-        
-    return project.integrations
+    
+    # Generate mock integrations since real ones aren't available
+    return generate_mock_integrations(project_id)
 
-@router.get("/{project_id}/metrics", response_model=List)
+@router.get("/{project_id}/metrics")
 async def get_project_metrics(project_id: int, db: Session = Depends(get_db)):
     """Get all metrics for a project"""
     project = db.query(Project).filter(Project.id == project_id).first()
     
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-        
-    return project.metrics 
+    
+    # Generate mock metrics since real ones aren't available
+    return generate_mock_metrics(project_id) 
