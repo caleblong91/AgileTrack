@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
+from typing import List, Dict, Any, Optional, Union
+from pydantic import BaseModel, field_serializer
 from sqlalchemy.sql import func
+from datetime import datetime
 
 from src.backend.database import get_db
 from src.models.integration import Integration
@@ -26,10 +27,19 @@ class IntegrationCreate(IntegrationBase):
 class IntegrationResponse(IntegrationBase):
     id: int
     active: bool
-    last_sync: Optional[str] = None
+    last_sync: Optional[Union[str, datetime]] = None
+    
+    @field_serializer('last_sync')
+    def serialize_dt(self, dt: Optional[Union[str, datetime]], _info):
+        if dt is None:
+            return None
+        if isinstance(dt, str):
+            return dt
+        return dt.isoformat()
     
     class Config:
         orm_mode = True
+        from_attributes = True
         
 class MetricsRequest(BaseModel):
     days: Optional[int] = 30
