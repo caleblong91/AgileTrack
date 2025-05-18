@@ -2,6 +2,42 @@
 
 A comprehensive platform for tracking and improving agile maturity across development teams. AgileTrack provides insights by collecting and analyzing data from multiple sources like GitHub, Jira, and Trello.
 
+## Architecture Overview
+
+AgileTrack follows a modern microservices architecture pattern:
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│                 │     │                 │     │                 │
+│  React Frontend │─────│  FastAPI Backend│─────│  PostgreSQL DB  │
+│                 │     │                 │     │                 │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                               │
+                               │
+                        ┌──────┴──────┐
+                        │             │
+                        │  Redis      │
+                        │  (Celery)   │
+                        │             │
+                        └─────────────┘
+                               │
+                               ▼
+                     ┌───────────────────┐
+                     │  External APIs    │
+                     │  - GitHub         │
+                     │  - Jira           │
+                     │  - Trello         │
+                     └───────────────────┘
+```
+
+### Main Components:
+
+1. **Frontend**: React-based SPA with modern UI components and data visualization
+2. **Backend API**: FastAPI-powered REST API handling business logic and data processing
+3. **Database**: PostgreSQL for persistent storage with SQLAlchemy ORM
+4. **Background Tasks**: Celery with Redis for async data processing
+5. **Integration Layer**: Adapters for external services like GitHub, Jira, and Trello
+
 ## Features
 
 - **Multi-source Integration**: Connect with GitHub, Jira, Trello, and more
@@ -11,37 +47,39 @@ A comprehensive platform for tracking and improving agile maturity across develo
 - **Beautiful Dashboards**: Visualize metrics with modern UI
 - **Secure Authentication**: JWT-based authentication with password hashing
 - **High Performance**: Local caching and optimized API calls for fast dashboard loading
+- **Team Management**: Create and manage multiple teams within your organization
+- **User Onboarding**: Guided setup flow for new users to configure their integrations
+- **Real-time Sync**: Automatic synchronization of metrics from external services
 
-## Recent Updates
+## Technical Details
 
-The following improvements were recently added to enhance the application:
+### Backend (Python/FastAPI)
 
-### Integration Fixes
-- Fixed timezone handling in GitHub integration to correctly compare dates
-- Resolved Pydantic model validation issues for integration responses
-- Fixed CORS configuration to allow proper cross-origin requests
+- **Data Models**:
+  - User: Authentication and user management
+  - Team: Team structure and configuration
+  - Integration: External service connections
+  - Project: Project structure
+  - Metrics: Performance data collection
 
-### Dashboard Enhancements
-- Implemented real-time metrics display from GitHub, Jira, and Trello integrations
-- Added integration metrics table showing key performance indicators
-- Enhanced visualization of agile maturity metrics with dynamic charts
-- Added smart analysis of metrics to provide actionable improvement suggestions
+- **API Routes**:
+  - `/auth`: Authentication and user management
+  - `/teams`: Team management
+  - `/integrations`: External service connections
+  - `/projects`: Project configuration
 
-### Performance Optimizations
-- Added persistent browser caching with localStorage to improve load times on refresh
-- Implemented parallel API calls for faster data loading
-- Added section-based loading indicators for better user feedback
-- Integrated a force refresh mechanism to update all data when needed
-- Added background data refreshing for real-time updates
+- **Integration Adapters**:
+  - GitHub: Pull requests, commits, issues analysis
+  - Jira: Tickets, sprints, velocity analysis
+  - Trello: Boards, cards, workflow analysis
 
-## Tech Stack
+### Frontend (React)
 
-- **Backend**: Python with FastAPI
-- **Frontend**: React with Chart.js for visualizations
-- **Database**: PostgreSQL (with SQLAlchemy ORM)
-- **Task Processing**: Celery with Redis for background tasks
-- **Data Analysis**: Pandas & NumPy
-- **Authentication**: JWT tokens with bcrypt password hashing
+- **State Management**: React Context API for global state
+- **Authentication**: JWT token-based auth with secure storage
+- **Data Visualization**: Charts.js for metrics visualization
+- **Responsive Design**: Modern UI that works across devices
+- **Optimistic UI**: Immediate feedback with background syncing
 
 ## Getting Started
 
@@ -50,24 +88,48 @@ The following improvements were recently added to enhance the application:
 - Node.js 14+
 - PostgreSQL (or SQLite for development)
 - Redis (optional, for background tasks)
+- Git account with API access (for GitHub integration)
 
 ### Installation
 
-1. Clone the repository
+#### Using Docker (Recommended)
+
+The easiest way to get started with AgileTrack:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/agiletrack.git
+cd agiletrack
+
+# Run the setup script to create environment files
+./create-env.sh
+
+# Build and start the Docker containers
+docker-compose up -d
 ```
+
+This will start:
+- Frontend on http://localhost
+- Backend API on http://localhost/api
+- API documentation on http://localhost/api/docs
+
+#### Manual Installation
+
+1. Clone the repository
+```bash
 git clone https://github.com/yourusername/agiletrack.git
 cd agiletrack
 ```
 
 2. Set up Python environment
-```
+```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 3. Set up frontend
-```
+```bash
 cd src/frontend
 npm install
 ```
@@ -85,95 +147,51 @@ TRELLO_API_SECRET=your_trello_api_secret
 TRELLO_TOKEN=your_trello_token
 ```
 
-### Running the Application
-
-1. Start the backend API
-```
+5. Initialize database
+```bash
 cd AgileTrack
+python -m src.backend.database
+python create_admin.py  # Creates an admin user
+```
+
+6. Start the backend API
+```bash
 uvicorn src.backend.main:app --reload
 ```
 
-2. Start the frontend development server
-```
+7. Start the frontend development server (in a new terminal)
+```bash
 cd src/frontend
 npm start
 ```
 
-3. Open your browser and navigate to `http://localhost:3000`
+### Running in Production
 
-### Running with Docker
+For production deployment:
 
-The application is containerized for easy deployment and development.
-
-#### Quick Start
-
-The easiest way to get started with Docker:
-
+1. Build optimized frontend
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/agiletrack.git
-cd agiletrack
-
-# Run the quick start script
-./docker-start.sh
+cd src/frontend
+npm run build
 ```
 
-Then open your browser to http://localhost
-
-#### Prerequisites
-- Docker
-- Docker Compose
-
-#### Start the Application with Docker
-
-1. Clone the repository
+2. Use gunicorn with uvicorn workers
 ```bash
-git clone https://github.com/yourusername/agiletrack.git
-cd agiletrack
+gunicorn -w 4 -k uvicorn.workers.UvicornWorker src.backend.main:app
 ```
 
-2. Create a `.env` file from the template
-```bash
-cp .env.example .env
-# Edit the .env file with your configuration
-```
+3. Use a reverse proxy like Nginx to serve static files and proxy API requests
 
-3. Build and start the containers
-```bash
-docker-compose up -d
-```
+## User Flow
 
-4. Access the application at `http://localhost`
-
-5. To view logs
-```bash
-docker-compose logs -f
-```
-
-6. To stop the application
-```bash
-docker-compose down
-```
-
-#### Development with Docker
-
-The Docker setup includes volume mounting for development:
-- Backend code changes are automatically reloaded
-- For frontend changes, you'll need to rebuild the container:
-```bash
-docker-compose build frontend
-docker-compose up -d frontend
-```
-
-#### Database Management
-
-- The PostgreSQL database is accessible at `localhost:5432`
-- Data is persisted in a Docker volume
-- To reset the database:
-```bash
-docker-compose down -v  # This will delete the volumes
-docker-compose up -d    # Start fresh
-```
+1. **Registration**: Create a new account with email and password
+2. **Setup Process**:
+   - Personal information (name, company, role)
+   - Team creation or selection
+   - Integration setup (GitHub, Jira, or Trello)
+3. **Dashboard**: View metrics, team performance, and recommendations
+4. **Integrations**: Add or edit external service connections
+5. **Teams**: Manage teams and view team-specific metrics
 
 ## Authentication System
 
@@ -207,16 +225,44 @@ All API endpoints (except authentication) require a valid JWT token:
 - Tokens must be included in the Authorization header: `Authorization: Bearer <token>`
 - Invalid or expired tokens result in 401 Unauthorized responses
 
-### Security Considerations
+## Integration Details
 
-- All passwords are hashed using bcrypt before storage
-- Tokens have a 24-hour expiration
-- Sensitive endpoint access is limited to authenticated users
-- CORS headers are configured for security
+### GitHub Integration
 
-## API Documentation
+- **Required credentials**: Personal Access Token with the following scopes:
+  - `repo` - For private repositories
+  - `read:user` - For user information
+  - `read:org` - For organization repositories
 
-Once the application is running, you can access the API documentation at `http://localhost:8000/docs` or `http://localhost:8000/redoc`.
+- **Metrics collected**:
+  - Pull request metrics (count, merge rate, time to merge)
+  - Commit metrics (count, size, frequency)
+  - Issue metrics (count, close rate, time to close)
+
+### Jira Integration
+
+- **Required credentials**:
+  - Jira server URL
+  - Email address
+  - API token
+
+- **Metrics collected**:
+  - Sprint velocity
+  - Issue cycle time
+  - Backlog health
+  - Burndown charts
+
+### Trello Integration
+
+- **Required credentials**:
+  - API key
+  - API token
+
+- **Metrics collected**:
+  - Card cycle time
+  - List distribution
+  - Activity metrics
+  - Workflow efficiency
 
 ## Testing
 
@@ -249,44 +295,25 @@ npm test
 
 # Run with coverage report
 npm test -- --coverage
+
+# Run specific test files
+npm test -- AuthContext
 ```
 
-### Running Tests with Docker
+## Contribution Guidelines
 
-You can also run the tests using Docker, which ensures a clean, consistent environment:
-
-```bash
-# Run all tests
-./docker-test.sh
-
-# Run only backend tests
-./docker-test.sh backend
-
-# Run only frontend tests
-./docker-test.sh frontend
-```
-
-This uses a separate Docker Compose configuration that creates temporary test databases and services.
-
-### Continuous Integration
-
-The project is configured with GitHub Actions for continuous integration. Every push and pull request to the main branch will trigger:
-
-1. Backend tests on multiple Python versions
-2. Frontend tests on multiple Node.js versions
-3. Code linting
-4. Test coverage reporting
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-When contributing, please:
-1. Write tests for new features or bug fixes
-2. Ensure all tests pass before submitting a PR
-3. Update documentation as needed
-4. Follow the existing code style
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Commit your changes: `git commit -am 'Add new feature'`
+4. Push to the branch: `git push origin feature/your-feature-name`
+5. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- FastAPI for the excellent API framework
+- React team for the frontend library
+- All open-source libraries and contributors used in this project 
