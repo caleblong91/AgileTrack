@@ -146,6 +146,7 @@ const Dashboard = () => {
     if (!teamId) return [];
     
     try {
+      console.log(`Fetching integrations for team ${teamId}, forceRefresh=${forceRefresh}`);
       setSectionLoading(prev => ({ ...prev, integrations: true }));
       
       // Try to get integrations from localStorage cache
@@ -154,17 +155,21 @@ const Dashboard = () => {
       
       if (!forceRefresh) {
         integrationsData = localStorageCache.get(cacheKey);
+        console.log(`Cache for ${cacheKey}:`, integrationsData);
       }
       
       // If no cache or force refresh, fetch from API
       if (!integrationsData) {
+        console.log(`Making API call to /teams/${teamId}/integrations`);
         const integrationsResponse = await api.get(`/teams/${teamId}/integrations`);
         integrationsData = integrationsResponse.data;
+        console.log(`API response for integrations:`, integrationsData);
         
         // Save to localStorage cache
         localStorageCache.set(cacheKey, integrationsData);
       }
       
+      console.log(`Setting integrations state:`, integrationsData);
       setIntegrations(integrationsData);
       
       // Update summary data related to integrations
@@ -175,6 +180,7 @@ const Dashboard = () => {
       
       return integrationsData;
     } catch (error) {
+      console.error(`Error fetching integrations for team ${teamId}:`, error);
       return [];
     } finally {
       setSectionLoading(prev => ({ ...prev, integrations: false }));
@@ -394,6 +400,9 @@ const Dashboard = () => {
 
   // Update useEffect to handle loading states properly
   useEffect(() => {
+    // Force cache clear on initial load to avoid stale data
+    localStorageCache.clear();
+    
     const loadData = async () => {
       // Start with showing loading state
       setLoading(true);
@@ -405,153 +414,70 @@ const Dashboard = () => {
       });
       
       try {
-        // STEP 1: Try to load everything from cache first for immediate display
-        
-        // Get teams from cache
-        const cachedTeams = localStorageCache.get('teams');
-        if (cachedTeams && cachedTeams.length > 0) {
-          setTeams(cachedTeams);
-          setSectionLoading(prev => ({ ...prev, teams: false }));
-          
-          // Get last selected team or default to first team
-          let currentTeam = null;
-          const lastSelectedTeamId = localStorage.getItem('agiletrack_selected_team');
-          if (lastSelectedTeamId) {
-            currentTeam = cachedTeams.find(t => t.id === parseInt(lastSelectedTeamId));
-          }
-          
-          if (!currentTeam) {
-            currentTeam = cachedTeams[0];
-          }
-          
-          setSelectedTeam(currentTeam);
-          
-          // Try to get cached integrations for this team
-          const cachedIntegrations = localStorageCache.get(`team_${currentTeam.id}_integrations`);
-          if (cachedIntegrations && cachedIntegrations.length > 0) {
-            setIntegrations(cachedIntegrations);
-            setSectionLoading(prev => ({ ...prev, integrations: false }));
-            
-            // Try to get cached metrics
-            const cachedMetrics = localStorageCache.get(`team_${currentTeam.id}_metrics`);
-            if (cachedMetrics && Object.keys(cachedMetrics).length > 0) {
-              setMetrics(cachedMetrics);
-              setSectionLoading(prev => ({ ...prev, metrics: false }));
-              calculateSummaryFromMetrics(cachedMetrics);
-              setSectionLoading(prev => ({ ...prev, summary: false }));
-              
-              // All cached data is loaded, we can hide the main loading spinner
-              setLoading(false);
-            }
-            
-            // Try to get cached summary
-            const cachedSummary = localStorageCache.get(`team_${currentTeam.id}_summary`);
-            if (cachedSummary) {
-              setSummary(prev => ({
-                ...prev,
-                ...cachedSummary
-              }));
-              setSectionLoading(prev => ({ ...prev, summary: false }));
-            }
-          }
-        }
-        
-        // STEP 2: Fetch fresh data in the background, regardless of whether we loaded from cache
-        
-        // Fetch teams
-        const teamsData = await fetchTeams(false);  // Use false to not force refresh if we have cache
+        // Always fetch fresh data from API
+        const teamsResponse = await api.get('/teams');
+        const teamsData = teamsResponse.data || [];
+        setTeams(teamsData);
         setSectionLoading(prev => ({ ...prev, teams: false }));
         
-        // Ensure we have a team selected
-        let currentTeam = selectedTeam;
-        if (!currentTeam && teamsData.length > 0) {
-          // Get last selected team or use first one
-          const lastSelectedTeamId = localStorage.getItem('agiletrack_selected_team');
-          if (lastSelectedTeamId) {
-            currentTeam = teamsData.find(t => t.id === parseInt(lastSelectedTeamId)) || teamsData[0];
-          } else {
-            currentTeam = teamsData[0];
-          }
-          setSelectedTeam(currentTeam);
-        }
-        
-        // Exit early if no team is selected
-        if (!currentTeam) {
+        // Exit early if no teams found
+        if (!teamsData || teamsData.length === 0) {
           setLoading(false);
           resetAllSectionLoading();
           return;
         }
         
-        // Load integrations 
-        const integrationsData = await fetchIntegrations(currentTeam.id, false); // Don't force refresh if we have cache
+        // Get last selected team or use first team
+        let currentTeam = null;
+        const lastSelectedTeamId = localStorage.getItem('agiletrack_selected_team');
+        if (lastSelectedTeamId) {
+          currentTeam = teamsData.find(t => t.id === parseInt(lastSelectedTeamId)) || teamsData[0];
+        } else {
+          currentTeam = teamsData[0];
+        }
+        setSelectedTeam(currentTeam);
+        
+        // Directly fetch integrations from API
+        console.log(`Fetching integrations for team ${currentTeam.id}`);
+        const integrationsResponse = await api.get(`/teams/${currentTeam.id}/integrations`);
+        const integrationsData = integrationsResponse.data || [];
+        console.log(`Received integrations:`, integrationsData);
+        
+        setIntegrations(integrationsData);
         setSectionLoading(prev => ({ ...prev, integrations: false }));
+        setSummary(prev => ({ ...prev, teamIntegrations: integrationsData.length }));
         
-        // Exit early if no integrations found
-        if (!integrationsData || integrationsData.length === 0) {
-          setLoading(false);
-          resetAllSectionLoading();
-          return;
-        }
-        
-        // IMPORTANT: For each integration, directly call the metrics API
-        // This ensures we have fresh metrics data on page load, without relying on complex logic
-        const metricsData = {};
-        
-        try {
-          setSectionLoading(prev => ({ ...prev, metrics: true }));
+        // Only try to fetch metrics if we have integrations
+        if (integrationsData && integrationsData.length > 0) {
+          // Fetch metrics directly without caching
+          console.log(`Fetching metrics for ${integrationsData.length} integrations`);
+          const metricsData = {};
           
+          // Create promises for all integration metrics requests
           const metricsPromises = integrationsData.map(integration => {
-            // Skip invalid GitHub integrations
-            if (integration.type.toLowerCase() === 'github' && 
-                (!integration.config || !integration.config.repository || integration.config.repository.trim() === '')) {
-              return Promise.resolve(null);
-            }
-            
             return api.post(`/integrations/${integration.id}/metrics`, { days: 30 })
               .then(response => {
-                if (response.data && response.data.metrics && !response.data.metrics.error) {
-                  // Store metrics in our object
+                console.log(`Received metrics for integration ${integration.id}:`, response.data);
+                if (response.data && response.data.metrics) {
                   metricsData[integration.id] = response.data.metrics;
-                  
-                  // Also cache it
-                  metricsCache.set(`metrics_${integration.id}`, response.data.metrics);
-                  localStorageCache.set(`metrics_${integration.id}`, response.data.metrics);
-                  
-                  return {
-                    integrationId: integration.id,
-                    metrics: response.data.metrics
-                  };
                 }
-                return null;
               })
               .catch(error => {
-                return null;
+                console.error(`Error fetching metrics for integration ${integration.id}:`, error);
               });
           });
           
-          // Wait for all metrics requests to complete with a timeout
+          // Wait for all metrics to be fetched
           await Promise.all(metricsPromises);
           
-          // Set metrics state only if we got new data
-          if (Object.keys(metricsData).length > 0) {
-            setMetrics(metricsData);
-            
-            // Cache the complete metrics set
-            localStorageCache.set(`team_${currentTeam.id}_metrics`, metricsData);
-            
-            // Calculate summary
-            calculateSummaryFromMetrics(metricsData);
-          }
-        } catch (error) {
-          // Silent error handling for metrics
-        } finally {
-          // Always clear metrics loading state
-          setSectionLoading(prev => ({ ...prev, metrics: false, summary: false }));
+          // Update metrics state
+          setMetrics(metricsData);
+          calculateSummaryFromMetrics(metricsData);
         }
+        
       } catch (error) {
-        // Silent error handling
+        console.error("Error loading dashboard data:", error);
       } finally {
-        // Ensure all loading states are reset
         setLoading(false);
         resetAllSectionLoading();
       }
@@ -560,18 +486,13 @@ const Dashboard = () => {
     // Execute data loading
     loadData();
     
-    // Set up a refresh interval for metrics - using 10 minutes now for less frequent updates
+    // Set up a refresh interval for data - every 60 seconds
     const refreshTimer = setInterval(() => {
-      if (selectedTeam && integrations.length > 0) {
-        fetchMetrics(integrations, true).finally(() => {
-          // Always reset section loading for metrics after refresh
-          setSectionLoading(prev => ({ ...prev, metrics: false, summary: false }));
-        });
-      }
-    }, 10 * 60 * 1000); // 10 minutes
+      loadData(); // Reload everything periodically
+    }, 60000); 
     
     return () => clearInterval(refreshTimer);
-  }, []);  // Empty dependency array for initial load only
+  }, []);
 
   // Effect to update integrations when selected team changes
   useEffect(() => {
@@ -939,6 +860,14 @@ const Dashboard = () => {
     );
   }
 
+  // Debug logs for rendering state
+  console.log("Dashboard render state:", { 
+    selectedTeam, 
+    integrations: integrations.length, 
+    integrationsList: integrations,
+    metrics: Object.keys(metrics).length 
+  });
+
   return (
     <div>
       <div className="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -1105,7 +1034,40 @@ const Dashboard = () => {
                     </table>
                   </div>
                 ) : (
-                  renderMetricsWaitingPanel()
+                  <div>
+                    <div className="table-responsive">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Integration</th>
+                            <th>Type</th>
+                            <th>Repository</th>
+                            <th>Status</th>
+                            <th>Last Sync</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {integrations.map(integration => (
+                            <tr key={integration.id}>
+                              <td>{integration.name}</td>
+                              <td>{integration.type}</td>
+                              <td>{integration.config?.repository || 'N/A'}</td>
+                              <td>
+                                <span className={`badge ${integration.active ? 'bg-success' : 'bg-secondary'}`}>
+                                  {integration.active ? 'Active' : 'Inactive'}
+                                </span>
+                              </td>
+                              <td>{integration.last_sync || 'Never'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="alert alert-info mt-3">
+                      <h6 className="alert-heading">Metrics Loading</h6>
+                      <p className="mb-0">Metrics for your integrations are being processed. This may take a few minutes for the first sync.</p>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

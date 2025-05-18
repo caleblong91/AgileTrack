@@ -206,6 +206,7 @@ export function AuthProvider({ children }) {
         type: integrationData.type,
         api_key: integrationData.apiKey, // Convert camelCase to snake_case
         project_id: integrationData.project_id || 1, // Default to project 1 if not specified
+        team_id: integrationData.team_id || integrationData.project_id || 1, // Use team_id or project_id
         config: integrationData.config || {} // Include config if provided
       };
       
@@ -217,7 +218,8 @@ export function AuthProvider({ children }) {
         };
       }
       
-      console.log("Sending integration request with project_id:", integrationRequestData.project_id);
+      console.log("Sending integration request with project_id:", integrationRequestData.project_id, 
+                 "and team_id:", integrationRequestData.team_id);
       
       // Add the integration via API
       const response = await api.post('/integrations', integrationRequestData);

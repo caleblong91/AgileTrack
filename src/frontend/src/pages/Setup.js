@@ -19,10 +19,13 @@ const Setup = () => {
   const [integration, setIntegration] = useState({
     type: 'github',
     apiKey: '',
-    name: ''
+    name: '',
+    repository: ''
   });
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [error, setError] = useState('');
+  const [repositories, setRepositories] = useState([]);
+  const [fetchingRepos, setFetchingRepos] = useState(false);
   
   // Fetch latest user status from the API on component mount
   useEffect(() => {
@@ -72,6 +75,39 @@ const Setup = () => {
     }
   }, [currentUser, setupComplete, hasIntegration, navigate]);
 
+  // Add effect to fetch repositories when a valid GitHub API key is entered
+  useEffect(() => {
+    // Only fetch when GitHub integration is selected and API key is long enough
+    if (integration.type === 'github' && integration.apiKey && integration.apiKey.length > 20) {
+      fetchGitHubRepositories(integration.apiKey);
+    }
+  }, [integration.type, integration.apiKey]);
+
+  // Function to fetch GitHub repositories
+  const fetchGitHubRepositories = async (apiKey) => {
+    setFetchingRepos(true);
+    setError(''); // Clear any previous errors
+    
+    try {
+      console.log('Fetching GitHub repositories with API key length:', apiKey.length);
+      const response = await api.post('/integrations/github/repositories', { api_key: apiKey });
+      
+      if (response.data && response.data.repositories) {
+        console.log(`Found ${response.data.repositories.length} repositories`);
+        setRepositories(response.data.repositories);
+      } else {
+        console.log('No repositories found in response:', response.data);
+        setRepositories([]);
+      }
+    } catch (error) {
+      console.error('Error fetching repositories:', error);
+      setError('Failed to fetch repositories: ' + (error.response?.data?.detail || 'Please check your API key'));
+      setRepositories([]);
+    } finally {
+      setFetchingRepos(false);
+    }
+  };
+
   const handleAccountInfoSubmit = (e) => {
     e.preventDefault();
     setStep(2);
@@ -100,16 +136,40 @@ const Setup = () => {
         });
       }
       
+      // Create a default team for the user
+      console.log("Creating default team");
+      let teamId = 1; // Default fallback
+      
+      try {
+        const teamName = integration.name ? `${integration.name} Team` : 'Default Team';
+        const teamResponse = await api.post('/teams', {
+          name: teamName,
+          description: `Created automatically during setup for ${integration.type} integration`
+        });
+        
+        console.log("Team created successfully:", teamResponse.data);
+        teamId = teamResponse.data.id;
+      } catch (teamError) {
+        console.error('Error creating team:', teamError);
+        // Continue with default team ID if team creation fails
+      }
+      
       console.log("Adding integration:", {
         type: integration.type,
-        name: integration.name
+        name: integration.name,
+        repository: integration.repository,
+        teamId: teamId
       });
       
-      // Then add the integration
+      // Then add the integration with the correct field names and team ID
       await addIntegration({
         type: integration.type,
         name: integration.name,
-        api_key: integration.apiKey
+        apiKey: integration.apiKey,
+        repository: integration.repository,
+        project_id: teamId, // Use the team ID as project_id
+        team_id: teamId,    // Also include team_id
+        config: integration.type === 'github' ? { repository: integration.repository } : {}
       });
       
       // Redirect to dashboard
@@ -348,7 +408,7 @@ const Setup = () => {
                     />
                   </div>
                   
-                  <div className="mb-4">
+                  <div className="mb-3">
                     <label htmlFor="apiKey" className="form-label">API Key</label>
                     <input 
                       type="text" 
@@ -370,6 +430,44 @@ const Setup = () => {
                     </div>
                   </div>
                   
+                  {/* Repository Selection Dropdown - Only show for GitHub when repositories are loaded */}
+                  {integration.type === 'github' && (
+                    <div className="mb-3">
+                      <label htmlFor="repository" className="form-label">Repository</label>
+                      {fetchingRepos ? (
+                        <div className="d-flex align-items-center">
+                          <div className="spinner-border spinner-border-sm text-primary me-2" role="status">
+                            <span className="visually-hidden">Loading...</span>
+                          </div>
+                          <span>Loading repositories...</span>
+                        </div>
+                      ) : repositories.length > 0 ? (
+                        <select
+                          id="repository"
+                          className="form-select"
+                          value={integration.repository}
+                          onChange={(e) => setIntegration({...integration, repository: e.target.value})}
+                          required
+                        >
+                          <option value="">Select a repository</option>
+                          {repositories.map(repo => (
+                            <option key={repo.id} value={repo.name}>
+                              {repo.name} {repo.private ? '(Private)' : '(Public)'}
+                            </option>
+                          ))}
+                        </select>
+                      ) : integration.apiKey && integration.apiKey.length > 10 ? (
+                        <div className="alert alert-warning">
+                          No repositories found or API key is invalid. Please check your API key and try again.
+                        </div>
+                      ) : (
+                        <div className="form-text text-muted">
+                          Enter a valid GitHub API key above to load your repositories.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
                   <div className="d-flex justify-content-between">
                     <button 
                       type="button" 
@@ -381,7 +479,7 @@ const Setup = () => {
                     <button 
                       type="submit" 
                       className="btn btn-primary"
-                      disabled={loading}
+                      disabled={loading || (integration.type === 'github' && !integration.repository)}
                     >
                       {loading ? 'Connecting...' : 'Complete Setup'}
                     </button>

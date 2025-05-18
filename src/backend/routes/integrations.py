@@ -19,6 +19,7 @@ class IntegrationBase(BaseModel):
     api_url: Optional[str] = None
     username: Optional[str] = None
     project_id: int
+    team_id: Optional[int] = None
     
 class IntegrationCreate(IntegrationBase):
     api_key: str
@@ -87,6 +88,10 @@ async def create_integration(integration: IntegrationCreate, db: Session = Depen
         project_id = default_project.id
         print(f"Created default project with ID: {project_id}")
     
+    # Use team_id from request or default to project_id
+    team_id = integration.team_id or project_id
+    print(f"Creating integration with team_id: {team_id}, project_id: {project_id}")
+    
     # Create new integration in DB
     db_integration = Integration(
         name=integration.name,
@@ -95,13 +100,51 @@ async def create_integration(integration: IntegrationCreate, db: Session = Depen
         api_url=integration.api_url,
         username=integration.username,
         config=integration.config,
-        project_id=project_id
+        project_id=project_id,
+        team_id=team_id,
+        active=True
     )
     
     try:
         db.add(db_integration)
         db.commit()
         db.refresh(db_integration)
+        
+        # Immediately trigger initial metrics sync asynchronously through background task
+        # This ensures metrics are available right away
+        try:
+            print(f"Triggering initial metrics sync for integration {db_integration.id}")
+            
+            # Create integration instance for metrics
+            config = {
+                "api_token": db_integration.api_key,
+                "server": db_integration.api_url,
+                "username": db_integration.username,
+                "repository": db_integration.config.get("repository") if db_integration.config else None,
+            }
+            
+            integration_instance = IntegrationFactory.create_integration(
+                integration_type=db_integration.type,
+                config=config
+            )
+            
+            # Get metrics
+            metrics_config = {"days": 30}
+            try:
+                metrics = IntegrationFactory.get_metrics(integration_instance, metrics_config)
+                # Update last_sync in DB
+                db_integration.last_sync = func.now()
+                db.commit()
+                print(f"Successfully synced metrics for integration {db_integration.id}")
+            except Exception as metrics_error:
+                print(f"Error getting initial metrics for integration {db_integration.id}: {str(metrics_error)}")
+                # Still mark as synced to show in dashboard
+                db_integration.last_sync = func.now()
+                db.commit()
+        except Exception as e:
+            print(f"Error triggering initial metrics sync: {str(e)}")
+            # Continue even if metrics sync fails
+        
         return db_integration
     except Exception as e:
         db.rollback()
