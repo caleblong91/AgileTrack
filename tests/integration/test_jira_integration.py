@@ -85,11 +85,12 @@ class TestJiraIntegrationCaching:
         integration = JiraIntegration(server="https://test.jira.com", username="user", api_token="token")
 
         # Construct the expected cache key based on current cache.py logic
-        # Format: "calculate_metrics:PROJECT_KEY:days=DAYS"
-        expected_cache_key = f"calculate_metrics:{project_key_for_cache_test}:days={days_for_cache_test}"
+        # New key format: ClassName:function_name:project_key:PROJECT_KEY_VAL:days:DAYS_VAL
+        expected_cache_key = f"JiraIntegration:calculate_metrics:project_key:{project_key_for_cache_test}:days={days_for_cache_test}"
 
         # Ensure cache is clean before test
-        redis_client_instance.delete(expected_cache_key)
+        deleted_count = redis_client_instance.delete(expected_cache_key)
+        print(f"Attempted to delete key {expected_cache_key}, deleted: {deleted_count}")
         
         # First call - should hit API and cache the result
         print(f"First call for Jira project {project_key_for_cache_test} (cache key: {expected_cache_key})")

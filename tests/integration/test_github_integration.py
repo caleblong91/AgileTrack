@@ -12,7 +12,7 @@ except ImportError:
     redis_available = False
 
 from src.integrations.github_integration import GitHubIntegration
-from src.integrations.cache import generate_cache_key # To help with key cleanup
+# Removed unused import: from src.integrations.cache import generate_cache_key
 
 
 # Fixture to get a Redis client instance if available
@@ -183,11 +183,14 @@ class TestGitHubIntegration:
         # The cache key function needs the method object.
         # We can't directly call the `generate_cache_key` from `cache.py` easily here without the method instance.
         # So, we'll generate it manually based on observed behavior.
-        # Expected key format: "calculate_metrics:REPOSITORY_NAME:days=DAYS_ARG"
-        expected_cache_key = f"calculate_metrics:{repo_name_for_cache_test}:days=30"
-
+        # New key format: ClassName:function_name:repository_name:repo_val:days:days_val
+        expected_cache_key = f"GitHubIntegration:calculate_metrics:repository_name:{repo_name_for_cache_test}:days=30"
+        
         # Ensure cache is clean before test
-        redis_client_instance.delete(expected_cache_key)
+        # Note: If the key construction here is wrong, this delete might not work, but the test's core logic
+        # (cache hit/miss) depends on the decorator's internal key generation, which should be correct.
+        deleted_count = redis_client_instance.delete(expected_cache_key)
+        print(f"Attempted to delete key {expected_cache_key}, deleted: {deleted_count}")
         
         # First call - should hit API and cache the result
         print(f"First call for {repo_name_for_cache_test} (cache key: {expected_cache_key})")
