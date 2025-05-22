@@ -46,7 +46,7 @@ AgileTrack follows a modern microservices architecture pattern:
 - **Actionable Insights**: Get recommendations for process improvements
 - **Beautiful Dashboards**: Visualize metrics with modern UI
 - **Secure Authentication**: JWT-based authentication with password hashing
-- **High Performance**: Local caching and optimized API calls for fast dashboard loading
+- **High Performance**: Multi-level caching system for fast dashboard loading
 - **Team Management**: Create and manage multiple teams within your organization
 - **User Onboarding**: Guided setup flow for new users to configure their integrations
 - **Real-time Sync**: Automatic synchronization of metrics from external services
@@ -73,13 +73,22 @@ AgileTrack follows a modern microservices architecture pattern:
   - Jira: Tickets, sprints, velocity analysis
   - Trello: Boards, cards, workflow analysis
 
+- **Background Tasks (Celery)**:
+  - Initial metrics sync for new integrations
+  - Periodic metrics sync for all active integrations
+  - Automatic retry mechanism for failed tasks
+  - Configurable sync intervals per integration type
+
 ### Frontend (React)
 
 - **State Management**: React Context API for global state
 - **Authentication**: JWT token-based auth with secure storage
 - **Data Visualization**: Charts.js for metrics visualization
 - **Responsive Design**: Modern UI that works across devices
-- **Optimistic UI**: Immediate feedback with background syncing
+- **Multi-level Caching**:
+  - Local Storage: Persistent cache for teams and integrations (3-day expiry)
+  - In-memory Cache: Session-based cache for metrics (4-hour expiry)
+  - Optimistic UI updates with background syncing
 
 ## Getting Started
 
@@ -87,7 +96,7 @@ AgileTrack follows a modern microservices architecture pattern:
 - Python 3.8+
 - Node.js 14+
 - PostgreSQL (or SQLite for development)
-- Redis (optional, for background tasks)
+- Redis (required for Celery background tasks)
 - Git account with API access (for GitHub integration)
 
 ### Installation
@@ -112,6 +121,8 @@ This will start:
 - Frontend on http://localhost
 - Backend API on http://localhost/api
 - API documentation on http://localhost/api/docs
+- Redis for Celery tasks
+- Celery worker for background tasks
 
 #### Manual Installation
 
@@ -138,6 +149,7 @@ npm install
 ```
 DATABASE_URL=postgresql://username:password@localhost/agiletrack
 SECRET_KEY=your_secure_secret_key_for_jwt
+REDIS_URL=redis://localhost:6379/0
 GITHUB_TOKEN=your_github_token
 JIRA_SERVER=https://your-domain.atlassian.net
 JIRA_USERNAME=your_email@example.com
@@ -154,12 +166,27 @@ python -m src.backend.database
 python create_admin.py  # Creates an admin user
 ```
 
-6. Start the backend API
+6. Start Redis server
+```bash
+redis-server
+```
+
+7. Start Celery worker
+```bash
+celery -A src.backend.tasks worker --loglevel=info
+```
+
+8. Start Celery beat (for periodic tasks)
+```bash
+celery -A src.backend.tasks beat --loglevel=info
+```
+
+9. Start the backend API
 ```bash
 uvicorn src.backend.main:app --reload
 ```
 
-7. Start the frontend development server (in a new terminal)
+10. Start the frontend development server (in a new terminal)
 ```bash
 cd src/frontend
 npm start
@@ -181,6 +208,15 @@ gunicorn -w 4 -k uvicorn.workers.UvicornWorker src.backend.main:app
 ```
 
 3. Use a reverse proxy like Nginx to serve static files and proxy API requests
+
+4. Configure Celery for production:
+```bash
+# Start Celery worker with production settings
+celery -A src.backend.tasks worker --loglevel=info --concurrency=4
+
+# Start Celery beat for periodic tasks
+celery -A src.backend.tasks beat --loglevel=info
+```
 
 ## User Flow
 
@@ -264,6 +300,38 @@ All API endpoints (except authentication) require a valid JWT token:
   - Activity metrics
   - Workflow efficiency
 
+## Caching System
+
+AgileTrack implements a multi-level caching system to optimize performance:
+
+### Frontend Caching
+
+1. **Local Storage Cache**:
+   - Persists between sessions (3-day expiry)
+   - Stores teams, integrations, and basic metrics
+   - Automatically cleared when data is stale
+
+2. **In-memory Cache**:
+   - Session-based cache (4-hour expiry)
+   - Stores frequently accessed metrics
+   - Cleared on page refresh
+
+3. **Optimistic Updates**:
+   - Immediate UI updates with background syncing
+   - Fallback to cached data if API calls fail
+
+### Backend Caching
+
+1. **Celery Task Results**:
+   - Cached in Redis
+   - Configurable expiry times
+   - Automatic cleanup of stale results
+
+2. **Integration Data**:
+   - Periodic background syncs
+   - Configurable sync intervals per integration type
+   - Automatic retry mechanism for failed syncs
+
 ## Testing
 
 The project includes a comprehensive test suite covering both backend and frontend code.
@@ -316,4 +384,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - FastAPI for the excellent API framework
 - React team for the frontend library
+- Celery for background task processing
 - All open-source libraries and contributors used in this project 

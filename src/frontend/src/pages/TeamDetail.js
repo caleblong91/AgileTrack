@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'; // Imported useMemo, useCallback
 import { useParams, Link } from 'react-router-dom';
 // REMOVED: import axios from 'axios';
-import api from '../../services/api'; // IMPORTED global api instance
+import api from '../services/api'; // IMPORTED global api instance
 
 // Charts
 import { Line, Bar, Radar } from 'react-chartjs-2';
@@ -49,111 +49,6 @@ const TeamDetail = () => {
   //     'Authorization': `Bearer ${localStorage.getItem('token')}`
   //   }
   // });
-
-  useEffect(() => {
-    const fetchTeamData = async () => {
-      setLoading(true);
-      setError(null); // Reset error state on new fetch
-
-      try {
-        const promises = [
-          api.get(`/teams/${id}`),           // 0: Team details
-          api.get(`/teams/${id}/projects`),    // 1: Team projects
-          api.get(`/teams/${id}/integrations`),// 2: Team integrations
-          api.get(`/teams/${id}/metrics`)      // 3: Team metrics
-        ];
-
-        // Use Promise.allSettled to ensure all promises complete, even if some fail
-        // This allows us to get partial data if, for example, metrics fail but team details succeed.
-        const results = await Promise.allSettled(promises);
-
-        // Process team details (critical)
-        if (results[0].status === 'fulfilled') {
-          setTeam(results[0].value.data);
-        } else {
-          // If team details fail, it's a critical error for this page
-          console.error('Error fetching team details:', results[0].reason);
-          setError(`Failed to load essential team details: ${results[0].reason?.response?.data?.detail || results[0].reason?.message || 'Unknown error'}`);
-          setLoading(false);
-          return; // Stop further processing if team details fail
-        }
-
-        // Process projects
-        if (results[1].status === 'fulfilled') {
-          setProjects(results[1].value.data || []);
-        } else {
-          console.error('Error fetching projects:', results[1].reason);
-          setProjects([]); // Set to empty array on error
-        }
-
-        // Process integrations
-        if (results[2].status === 'fulfilled') {
-          setIntegrations(results[2].value.data || []);
-        } else {
-          console.error('Error fetching integrations:', results[2].reason);
-          setIntegrations([]); // Set to empty array on error
-        }
-
-        // Process metrics
-        if (results[3].status === 'fulfilled') {
-          setMetrics(results[3].value.data || null);
-        } else {
-          console.error('Error fetching metrics:', results[3].reason);
-          setMetrics(null); // Set to null on error
-        }
-
-      } catch (err) {
-        // This catch block is for errors not directly from Promise.allSettled (e.g., issues setting up promises)
-        // or if we were using Promise.all and a critical error occurred.
-        console.error('Unexpected error during fetchTeamData:', err);
-        setError('An unexpected error occurred. Please try again later.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTeamData();
-  }, [id]);
-
-  if (loading) {
-    return (
-      <div className="d-flex justify-content-center align-items-center" style={{ height: '70vh' }}>
-        <div className="spinner-border text-primary" role="status">
-          <span className="visually-hidden">Loading...</span>
-        </div>
-      </div>
-    );
-  }
-  
-  if (error) {
-    return (
-      <div className="alert alert-danger mt-4" role="alert">
-        <h4 className="alert-heading">Error</h4>
-        <p>{error}</p>
-        <hr />
-        <Link to="/teams" className="btn btn-outline-danger">
-          Back to Teams
-        </Link>
-      </div>
-    );
-  }
-  
-  if (!team) {
-    return (
-      <div className="alert alert-warning mt-4" role="alert">
-        <h4 className="alert-heading">Team Not Found</h4>
-        <p>The team you're looking for doesn't exist or you don't have access to it.</p>
-        <hr />
-        <Link to="/teams" className="btn btn-outline-warning">
-          Back to Teams
-        </Link>
-      </div>
-    );
-  }
-
-  // Make sure arrays are initialized
-  const integrationsArray = Array.isArray(integrations) ? integrations : [];
-  const projectsArray = Array.isArray(projects) ? projects : [];
 
   // Memoize metricsData to prevent re-computation if metrics prop hasn't changed
   const metricsData = useMemo(() => {
@@ -289,6 +184,111 @@ const TeamDetail = () => {
       .sort((a, b) => a[1] - b[1])
       .slice(0, 2);
   }, [metricsData.maturity_metrics]);
+
+  useEffect(() => {
+    const fetchTeamData = async () => {
+      setLoading(true);
+      setError(null); // Reset error state on new fetch
+
+      try {
+        const promises = [
+          api.get(`/teams/${id}`),           // 0: Team details
+          api.get(`/teams/${id}/projects`),    // 1: Team projects
+          api.get(`/teams/${id}/integrations`),// 2: Team integrations
+          api.get(`/teams/${id}/metrics`)      // 3: Team metrics
+        ];
+
+        // Use Promise.allSettled to ensure all promises complete, even if some fail
+        // This allows us to get partial data if, for example, metrics fail but team details succeed.
+        const results = await Promise.allSettled(promises);
+
+        // Process team details (critical)
+        if (results[0].status === 'fulfilled') {
+          setTeam(results[0].value.data);
+        } else {
+          // If team details fail, it's a critical error for this page
+          console.error('Error fetching team details:', results[0].reason);
+          setError(`Failed to load essential team details: ${results[0].reason?.response?.data?.detail || results[0].reason?.message || 'Unknown error'}`);
+          setLoading(false);
+          return; // Stop further processing if team details fail
+        }
+
+        // Process projects
+        if (results[1].status === 'fulfilled') {
+          setProjects(results[1].value.data || []);
+        } else {
+          console.error('Error fetching projects:', results[1].reason);
+          setProjects([]); // Set to empty array on error
+        }
+
+        // Process integrations
+        if (results[2].status === 'fulfilled') {
+          setIntegrations(results[2].value.data || []);
+        } else {
+          console.error('Error fetching integrations:', results[2].reason);
+          setIntegrations([]); // Set to empty array on error
+        }
+
+        // Process metrics
+        if (results[3].status === 'fulfilled') {
+          setMetrics(results[3].value.data || null);
+        } else {
+          console.error('Error fetching metrics:', results[3].reason);
+          setMetrics(null); // Set to null on error
+        }
+
+      } catch (err) {
+        // This catch block is for errors not directly from Promise.allSettled (e.g., issues setting up promises)
+        // or if we were using Promise.all and a critical error occurred.
+        console.error('Unexpected error during fetchTeamData:', err);
+        setError('An unexpected error occurred. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTeamData();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ height: '70vh' }}>
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (error) {
+    return (
+      <div className="alert alert-danger mt-4" role="alert">
+        <h4 className="alert-heading">Error</h4>
+        <p>{error}</p>
+        <hr />
+        <Link to="/teams" className="btn btn-outline-danger">
+          Back to Teams
+        </Link>
+      </div>
+    );
+  }
+  
+  if (!team) {
+    return (
+      <div className="alert alert-warning mt-4" role="alert">
+        <h4 className="alert-heading">Team Not Found</h4>
+        <p>The team you're looking for doesn't exist or you don't have access to it.</p>
+        <hr />
+        <Link to="/teams" className="btn btn-outline-warning">
+          Back to Teams
+        </Link>
+      </div>
+    );
+  }
+
+  // Make sure arrays are initialized
+  const integrationsArray = Array.isArray(integrations) ? integrations : [];
+  const projectsArray = Array.isArray(projects) ? projects : [];
 
   return (
     <div className="team-detail">

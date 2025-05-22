@@ -20,4 +20,16 @@ def get_db():
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+# Function to initialize database
+def init_db():
+    # Import all models here to ensure they are registered with Base
+    from src.models.user import User
+    from src.models.team import Team
+    from src.models.integration import Integration
+    from src.models.metric import Metric, Sprint, TeamMember
+    from src.models.project import Project
+    
+    # Create all tables
+    Base.metadata.create_all(bind=engine) 

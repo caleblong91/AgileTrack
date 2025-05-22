@@ -1,5 +1,6 @@
 import React, { Suspense, lazy } from 'react'; // Imported Suspense and lazy
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext'; // Moved to top with other imports
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -17,10 +18,6 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Login = lazy(() => import('./pages/Login'));
 const SignUp = lazy(() => import('./pages/SignUp'));
 const Setup = lazy(() => import('./pages/Setup'));
-
-
-// Auth Context
-import { AuthProvider } from './context/AuthContext'; // Removed useAuth as it's not used here
 
 // Loading fallback component
 const PageLoadingFallback = () => (

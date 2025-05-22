@@ -25,7 +25,7 @@ const Teams = () => {
         setLoading(true);
         setError(null);
         const response = await api.get('/teams');
-        const teamsData = response.data || [];
+        const teamsData = response.data?.items || [];
         setTeams(teamsData);
         
         // Fetch integrations for each team

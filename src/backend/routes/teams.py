@@ -122,7 +122,20 @@ async def get_teams(
     """Get all teams with pagination"""
     total_count = db.query(func.count(Team.id)).scalar()
     teams = db.query(Team).offset(skip).limit(limit).all()
-    return PaginatedTeamsResponse(total_count=total_count, items=teams)
+    
+    # Convert SQLAlchemy models to dictionaries
+    team_dicts = []
+    for team in teams:
+        team_dict = {
+            "id": team.id,
+            "name": team.name,
+            "description": team.description,
+            "active": team.active,
+            "maturity_level": team.maturity_level
+        }
+        team_dicts.append(team_dict)
+    
+    return PaginatedTeamsResponse(total_count=total_count, items=team_dicts)
 
 @router.post("/", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
 async def create_team(team: TeamCreate, db: Session = Depends(get_db)):

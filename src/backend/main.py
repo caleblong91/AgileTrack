@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import database
-from src.backend.database import engine, Base
+from src.backend.database import engine, Base, init_db
 
 # Import models in the correct order to avoid circular dependencies
 from src.models.user import User
@@ -23,14 +23,19 @@ from src.backend.routes import projects, integrations, auth, teams
 # Import Celery tasks
 from src.backend.tasks import app as celery_app
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+# Initialize database
+init_db()
 
 # Create FastAPI app
 app = FastAPI(title="AgileTrack API", description="API for tracking agile metrics across multiple platforms")
 
 # Add CORS middleware with specific configuration
-origins = ["*"]  # Allow all origins in development
+origins = [
+    "http://localhost",  # Frontend origin
+    "http://localhost:3000",  # Alternative frontend port
+    "http://127.0.0.1",
+    "http://127.0.0.1:3000"
+]
 
 app.add_middleware(
     CORSMiddleware,

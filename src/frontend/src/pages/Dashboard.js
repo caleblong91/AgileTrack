@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'; // Imported useCallback, useMemo
 // REMOVED: import axios from 'axios'; 
-import api from '../../services/api'; // IMPORTED global api instance
+import api from '../services/api'; // IMPORTED global api instance
 import { Link } from 'react-router-dom';
 import { Bar } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
@@ -407,8 +407,6 @@ const Dashboard = () => {
 
   // Update useEffect to handle loading states properly
   useEffect(() => {
-    // REMOVED: localStorageCache.clear(); // This was clearing the cache on every dashboard load.
-    
     const loadData = async () => {
       // Start with showing loading state
       setLoading(true);
@@ -422,7 +420,7 @@ const Dashboard = () => {
       try {
         // Always fetch fresh data from API
         const teamsResponse = await api.get('/teams');
-        const teamsData = teamsResponse.data || [];
+        const teamsData = teamsResponse.data?.items || [];
         setTeams(teamsData);
         setSectionLoading(prev => ({ ...prev, teams: false }));
         
@@ -491,13 +489,6 @@ const Dashboard = () => {
     
     // Execute data loading
     loadData();
-    
-    // REMOVED: Automatic refresh interval
-    // const refreshTimer = setInterval(() => {
-    //   loadData(); // Reload everything periodically
-    // }, 60000); 
-    //
-    // return () => clearInterval(refreshTimer);
   }, []);
 
   // Effect to update integrations when selected team changes
@@ -662,17 +653,21 @@ const Dashboard = () => {
         borderWidth: 1
       }
     ]
-  };
+  }), [chartMetrics]);
 
   const chartOptions = {
-    scales: {
-      y: {
-        beginAtZero: true,
-        max: 100
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Team Performance Metrics'
       }
     },
     maintainAspectRatio: false
-  }), [chartMetrics]); // chartData depends on chartMetrics
+  };
 
   // Get improvement suggestions based on metrics - result is memoized
   const improvementMetrics = useMemo(() => {
