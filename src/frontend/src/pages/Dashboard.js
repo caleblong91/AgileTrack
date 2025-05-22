@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useCallback, useMemo } from 'react'; // Imported useCallback, useMemo
+// REMOVED: import axios from 'axios'; 
+import api from '../../services/api'; // IMPORTED global api instance
 import { Link } from 'react-router-dom';
 import { Bar } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
@@ -81,16 +82,16 @@ const Dashboard = () => {
   });
 
   // API base URL
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+  // REMOVED: const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
   
-  // API instance with auth token
-  const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${localStorage.getItem('token')}`
-    }
-  });
+  // REMOVED: Local API instance with auth token
+  // const api = axios.create({
+  //   baseURL: API_BASE_URL,
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //     'Authorization': `Bearer ${localStorage.getItem('token')}`
+  //   }
+  // });
 
   // Fetch teams
   const fetchTeams = async (forceRefresh = false) => {
@@ -371,8 +372,8 @@ const Dashboard = () => {
     }
   };
 
-  // Handle team change
-  const handleTeamChange = async (teamId) => {
+  // Handle team change - wrapped in useCallback
+  const handleTeamChange = useCallback(async (teamId) => {
     const team = teams.find(t => t.id === parseInt(teamId));
     if (!team) return;
     
@@ -383,9 +384,15 @@ const Dashboard = () => {
     setMetrics({});
     
     // Fetch data for the new team
-    const integrationsData = await fetchIntegrations(team.id);
-    await fetchMetrics(integrationsData);
-  };
+    // fetchIntegrations and fetchMetrics are defined outside useCallback, 
+    // but they rely on state and props. If they were passed as props, 
+    // they'd need useCallback too. Here, they are part of the component's closure.
+    // The dependencies for handleTeamChange should include functions it calls if they could change.
+    // However, fetchIntegrations and fetchMetrics are stable in terms of reference (defined once per component instance).
+    // Their behavior changes based on state, which is fine.
+    const integrationsData = await fetchIntegrations(team.id); // Assuming fetchIntegrations is stable or memoized if it were a prop
+    await fetchMetrics(integrationsData); // Same for fetchMetrics
+  }, [teams, fetchIntegrations, fetchMetrics]); // Added dependencies: teams, and the fetch functions if they were not stable
 
   // Make sure the section loading indicators are reset properly
   // Add this helper function to reset all section loading states
@@ -400,8 +407,7 @@ const Dashboard = () => {
 
   // Update useEffect to handle loading states properly
   useEffect(() => {
-    // Force cache clear on initial load to avoid stale data
-    localStorageCache.clear();
+    // REMOVED: localStorageCache.clear(); // This was clearing the cache on every dashboard load.
     
     const loadData = async () => {
       // Start with showing loading state
@@ -486,12 +492,12 @@ const Dashboard = () => {
     // Execute data loading
     loadData();
     
-    // Set up a refresh interval for data - every 60 seconds
-    const refreshTimer = setInterval(() => {
-      loadData(); // Reload everything periodically
-    }, 60000); 
-    
-    return () => clearInterval(refreshTimer);
+    // REMOVED: Automatic refresh interval
+    // const refreshTimer = setInterval(() => {
+    //   loadData(); // Reload everything periodically
+    // }, 60000); 
+    //
+    // return () => clearInterval(refreshTimer);
   }, []);
 
   // Effect to update integrations when selected team changes
@@ -502,7 +508,7 @@ const Dashboard = () => {
   }, [selectedTeam]);
 
   // Helper function to calculate agile maturity based on metrics
-  const calculateAgileMaturity = (metricsData) => {
+  const calculateAgileMaturity = useCallback((metricsData) => {
     if (Object.keys(metricsData).length === 0) {
       return selectedTeam?.maturity_level ? selectedTeam.maturity_level * 20 : 65; // Default value if no data
     }
@@ -533,10 +539,10 @@ const Dashboard = () => {
     });
     
     return scoreCount > 0 ? Math.round(maturityScore / scoreCount) : (selectedTeam?.maturity_level ? selectedTeam.maturity_level * 20 : 65);
-  };
+  }, [selectedTeam, integrations]); // Added selectedTeam and integrations as calculateAgileMaturity implicitly depends on them via calculateSummaryFromMetrics
 
-  // Generate chart data from real metrics
-  const generateChartData = () => {
+  // Generate chart data from real metrics - result is memoized
+  const chartMetrics = useMemo(() => {
     // Default values
     const defaultData = {
       velocity: 0,
@@ -625,12 +631,9 @@ const Dashboard = () => {
       techDebt: techDebtCount > 0 ? Math.round(techDebt / techDebtCount) : defaultData.techDebt,
       continuousImprovement: improvementCount > 0 ? Math.round(continuousImprovement / improvementCount) : defaultData.continuousImprovement
     };
-  };
-
-  // Calculate chart data from real metrics
-  const chartMetrics = generateChartData();
+  }, [metrics, integrations, summary.teamVelocity]); // Dependencies for chartMetrics calculation
   
-  const chartData = {
+  const chartData = useMemo(() => ({
     labels: ['Velocity', 'Quality', 'Collaboration', 'Technical Debt', 'Continuous Improvement'],
     datasets: [
       {
@@ -669,10 +672,10 @@ const Dashboard = () => {
       }
     },
     maintainAspectRatio: false
-  };
+  }), [chartMetrics]); // chartData depends on chartMetrics
 
-  // Get improvement suggestions based on metrics
-  const getMetricsToImprove = () => {
+  // Get improvement suggestions based on metrics - result is memoized
+  const improvementMetrics = useMemo(() => {
     const improvements = [];
     
     // Check all metrics for potential improvements
@@ -749,14 +752,13 @@ const Dashboard = () => {
     }
     
     return improvements.slice(0, 3); // Return top 3 items
-  };
+  }, [metrics, integrations]); // Dependencies for improvementMetrics
   
-  // Get suggestions based on metrics that need improvement
-  const getSuggestions = () => {
-    const metricsToImprove = getMetricsToImprove();
+  // Get suggestions based on metrics that need improvement - result is memoized
+  const suggestions = useMemo(() => {
     const suggestions = [];
     
-    metricsToImprove.forEach(metric => {
+    improvementMetrics.forEach(metric => { // Use memoized improvementMetrics
       switch(metric.title) {
         case 'Pull Request Review Time':
           suggestions.push({
@@ -819,10 +821,8 @@ const Dashboard = () => {
     }
     
     return suggestions;
-  };
-  
-  const improvementMetrics = getMetricsToImprove();
-  const suggestions = getSuggestions();
+  }, [improvementMetrics]); // Dependency for suggestions
+
 
   // Helper function to render a loading indicator for a specific section
   const renderSectionLoading = (section) => {

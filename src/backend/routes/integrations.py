@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel, field_serializer
@@ -9,6 +9,7 @@ from src.backend.database import get_db
 from src.models.integration import Integration
 from src.models.project import Project
 from src.integrations.integration_factory import IntegrationFactory
+from src.backend.tasks import initial_sync_metrics_task # Import the Celery task
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -41,6 +42,11 @@ class IntegrationResponse(IntegrationBase):
     class Config:
         orm_mode = True
         from_attributes = True
+
+# New Pydantic model for paginated response
+class PaginatedIntegrationsResponse(BaseModel):
+    total_count: int
+    items: List[IntegrationResponse]
         
 class MetricsRequest(BaseModel):
     days: Optional[int] = 30
@@ -57,11 +63,16 @@ class GitHubTokenRequest(BaseModel):
     api_key: str
 
 # Routes
-@router.get("/", response_model=List[IntegrationResponse])
-async def get_integrations(db: Session = Depends(get_db)):
-    """Get all integrations"""
-    integrations = db.query(Integration).all()
-    return integrations
+@router.get("/", response_model=PaginatedIntegrationsResponse)
+async def get_integrations(
+    db: Session = Depends(get_db), 
+    skip: int = Query(0, ge=0, description="Number of items to skip"), 
+    limit: int = Query(100, ge=1, le=200, description="Number of items to return per page (max 200)")
+):
+    """Get all integrations with pagination"""
+    total_count = db.query(func.count(Integration.id)).scalar()
+    integrations = db.query(Integration).offset(skip).limit(limit).all()
+    return PaginatedIntegrationsResponse(total_count=total_count, items=integrations)
 
 @router.post("/", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED)
 async def create_integration(integration: IntegrationCreate, db: Session = Depends(get_db)):
@@ -110,41 +121,17 @@ async def create_integration(integration: IntegrationCreate, db: Session = Depen
         db.commit()
         db.refresh(db_integration)
         
-        # Immediately trigger initial metrics sync asynchronously through background task
-        # This ensures metrics are available right away
+        # Trigger initial metrics sync asynchronously using Celery
         try:
-            print(f"Triggering initial metrics sync for integration {db_integration.id}")
-            
-            # Create integration instance for metrics
-            config = {
-                "api_token": db_integration.api_key,
-                "server": db_integration.api_url,
-                "username": db_integration.username,
-                "repository": db_integration.config.get("repository") if db_integration.config else None,
-            }
-            
-            integration_instance = IntegrationFactory.create_integration(
-                integration_type=db_integration.type,
-                config=config
-            )
-            
-            # Get metrics
-            metrics_config = {"days": 30}
-            try:
-                metrics = IntegrationFactory.get_metrics(integration_instance, metrics_config)
-                # Update last_sync in DB
-                db_integration.last_sync = func.now()
-                db.commit()
-                print(f"Successfully synced metrics for integration {db_integration.id}")
-            except Exception as metrics_error:
-                print(f"Error getting initial metrics for integration {db_integration.id}: {str(metrics_error)}")
-                # Still mark as synced to show in dashboard
-                db_integration.last_sync = func.now()
-                db.commit()
+            print(f"Queueing initial metrics sync task for integration {db_integration.id}")
+            initial_sync_metrics_task.delay(db_integration.id)
+            print(f"Successfully queued Celery task for integration {db_integration.id}")
         except Exception as e:
-            print(f"Error triggering initial metrics sync: {str(e)}")
-            # Continue even if metrics sync fails
-        
+            # Log the error but don't let it fail the integration creation
+            print(f"Error queueing Celery task for initial metrics sync for integration {db_integration.id}: {str(e)}")
+            # Depending on policy, you might want to raise an alert here or handle it more actively.
+            # For now, the integration is created, but sync might need manual trigger or await a periodic job.
+
         return db_integration
     except Exception as e:
         db.rollback()

@@ -2,6 +2,7 @@ import os
 from trello import TrelloClient
 from datetime import datetime, timedelta
 import pandas as pd
+from .cache import redis_cache # Import the decorator
 
 class TrelloIntegration:
     def __init__(self, api_key=None, api_secret=None, token=None):
@@ -87,8 +88,15 @@ class TrelloIntegration:
                 
         return pd.DataFrame(card_data)
     
+    @redis_cache(ttl_seconds=1800) # Cache for 30 minutes
     def calculate_metrics(self, board_id, days=30):
         """Calculate agile metrics from Trello data"""
+        # Store board_id on instance for cache key generation if not already there
+        # This is a bit of a workaround for the current cache key generator
+        if not hasattr(self, 'board_id') or self.board_id != board_id:
+            self.board_id = board_id
+            
+        print(f"Calculating Trello metrics for board {board_id} over {days} days (cacheable)")
         lists = self.get_lists(board_id)
         cards = self.get_cards(board_id, days)
         

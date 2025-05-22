@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query # Added Query
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func # Added func
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
-from datetime import datetime, timedelta
-import random
+import asyncio 
 
 from src.backend.database import get_db
 from src.models.project import Project
+from src.models.integration import Integration # Import Integration model
+# Import relevant Pydantic models and functions from integrations router
+from src.backend.routes.integrations import IntegrationResponse, MetricsRequest, get_metrics 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -25,68 +28,33 @@ class ProjectResponse(ProjectBase):
     class Config:
         orm_mode = True
 
-# Mock data for integrations
-MOCK_INTEGRATION_TYPES = ["GitHub", "Jira", "Trello", "GitLab"]
+# Define a new response model for aggregated project metrics
+class ProjectMetricsResponse(BaseModel):
+    project_id: int
+    project_name: str
+    integrations_count: int
+    has_metrics: bool
+    metrics_by_integration: Dict[int, Dict[str, Any]] # Keyed by integration ID
+    # Add any summary metrics if needed, similar to TeamMetrics
+    summary: Optional[Dict[str, Any]] = None
 
-def generate_mock_integrations(project_id: int) -> List[Dict[str, Any]]:
-    """Generate mock integrations for a project"""
-    num_integrations = random.randint(1, 3)
-    integration_types = random.sample(MOCK_INTEGRATION_TYPES, num_integrations)
-    
-    return [
-        {
-            "id": i + 1,
-            "project_id": project_id,
-            "type": integration_type,
-            "config": {"url": f"https://api.{integration_type.lower()}.com", "token": "sample_token"},
-            "active": True,
-            "created_at": (datetime.now() - timedelta(days=random.randint(1, 30))).isoformat()
-        }
-        for i, integration_type in enumerate(integration_types)
-    ]
+# New Pydantic model for paginated Project response
+class PaginatedProjectsResponse(BaseModel):
+    total_count: int
+    items: List[ProjectResponse]
 
-def generate_mock_metrics(project_id: int) -> Dict[str, Any]:
-    """Generate mock metrics data for a project"""
-    num_sprints = 5
-    sprint_names = [f"Sprint {i+1}" for i in range(num_sprints)]
-    
-    # Generate increasing velocity with some variation
-    base_velocity = random.randint(8, 15)
-    velocities = []
-    for i in range(num_sprints):
-        v = base_velocity + i + random.randint(-2, 4)
-        velocities.append(v)
-    
-    # Generate decreasing burndown
-    total_work = random.randint(80, 150)
-    burndown = [total_work]
-    remaining = total_work
-    for i in range(1, num_sprints):
-        work_done = random.randint(15, 25)
-        remaining = max(0, remaining - work_done)
-        burndown.append(remaining)
-    
-    # Generate improving cycle time
-    base_cycle_time = random.uniform(4.0, 7.0)
-    cycle_times = []
-    for i in range(num_sprints):
-        ct = max(1.0, base_cycle_time - (i * 0.5) + random.uniform(-0.3, 0.3))
-        cycle_times.append(round(ct, 1))
-    
-    return {
-        "velocity": velocities,
-        "burndown": burndown,
-        "cycletime": cycle_times,
-        "sprints": sprint_names,
-        "project_id": project_id
-    }
 
 # Routes
-@router.get("/", response_model=List[ProjectResponse])
-async def get_projects(db: Session = Depends(get_db)):
-    """Get all projects"""
-    projects = db.query(Project).all()
-    return projects
+@router.get("/", response_model=PaginatedProjectsResponse)
+async def get_projects(
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(100, ge=1, le=200, description="Number of items to return per page (max 200)")
+):
+    """Get all projects with pagination"""
+    total_count = db.query(func.count(Project.id)).scalar()
+    projects = db.query(Project).offset(skip).limit(limit).all()
+    return PaginatedProjectsResponse(total_count=total_count, items=projects)
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
@@ -155,10 +123,11 @@ async def get_project_integrations(project_id: int, db: Session = Depends(get_db
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Generate mock integrations since real ones aren't available
-    return generate_mock_integrations(project_id)
+    # Query real integrations
+    project_integrations = db.query(Integration).filter(Integration.project_id == project_id).all()
+    return project_integrations
 
-@router.get("/{project_id}/metrics")
+@router.get("/{project_id}/metrics", response_model=ProjectMetricsResponse)
 async def get_project_metrics(project_id: int, db: Session = Depends(get_db)):
     """Get all metrics for a project"""
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -166,5 +135,101 @@ async def get_project_metrics(project_id: int, db: Session = Depends(get_db)):
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Generate mock metrics since real ones aren't available
-    return generate_mock_metrics(project_id) 
+    # Get active integrations for this project
+    integrations = db.query(Integration).filter(
+        Integration.project_id == project_id,
+        Integration.active == True
+    ).all()
+    
+    if not integrations:
+        return ProjectMetricsResponse(
+            project_id=project_id,
+            project_name=project.name,
+            integrations_count=0,
+            has_metrics=False,
+            metrics_by_integration={},
+            summary={"message": "No active integrations found for this project"}
+        )
+        
+    metrics_collection: Dict[int, Dict[str, Any]] = {}
+    tasks = []
+
+    for integration in integrations:
+        project_key = None
+        board_id = None
+        days = 30  # Default lookback period
+
+        if integration.type.lower() == "jira":
+            project_key = integration.config.get("project_key") if integration.config else None
+            if not project_key:
+                print(f"Warning: project_key not found in config for Jira integration ID {integration.id} of project {project_id}. Metrics might be incomplete or fail.")
+        elif integration.type.lower() == "trello":
+            board_id = integration.config.get("board_id") if integration.config else None
+            if not board_id:
+                 print(f"Warning: board_id not found in config for Trello integration ID {integration.id} of project {project_id}. Metrics might be incomplete or fail.")
+        
+        current_metrics_request = MetricsRequest(days=days, project_key=project_key, board_id=board_id)
+        
+        tasks.append(
+            get_metrics(
+                integration_id=integration.id,
+                metrics_request=current_metrics_request,
+                db=db
+            )
+        )
+
+    print(f"Gathering metrics for {len(tasks)} integrations concurrently for project {project_id}")
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    print(f"Finished gathering metrics for project {project_id}. Received {len(results)} results.")
+
+    for i, result in enumerate(results):
+        integration = integrations[i]
+        integration_id_key = integration.id # Use actual integration ID as key
+
+        if isinstance(result, Exception):
+            print(f"Error fetching metrics for integration {integration.id} ({integration.name}) for project {project_id}: {str(result)}")
+            metrics_collection[integration_id_key] = {
+                "source": integration.name,
+                "type": integration.type,
+                "error": str(result),
+                "data": {}
+            }
+        elif result and "metrics" in result:
+            metrics_data = result["metrics"]
+            if isinstance(metrics_data, dict) and "error" in metrics_data:
+                 print(f"Application error fetching metrics for integration {integration.id} ({integration.name}) for project {project_id}: {metrics_data['error']}")
+                 metrics_collection[integration_id_key] = {
+                    "source": integration.name,
+                    "type": integration.type,
+                    "error": metrics_data['error'],
+                    "data": {}
+                }
+            else:
+                metrics_collection[integration_id_key] = {
+                    "source": integration.name,
+                    "type": integration.type,
+                    "data": metrics_data
+                }
+        else:
+            print(f"Unexpected result structure for integration {integration.id} for project {project_id}: {result}")
+            metrics_collection[integration_id_key] = {
+                "source": integration.name,
+                "type": integration.type,
+                "error": "Unexpected result structure from metrics fetch.",
+                "data": {}
+            }
+            
+    # Basic summary (can be expanded)
+    total_fetched_metrics = sum(1 for m in metrics_collection.values() if not m.get("error") and m.get("data"))
+    
+    return ProjectMetricsResponse(
+        project_id=project_id,
+        project_name=project.name,
+        integrations_count=len(integrations),
+        has_metrics=total_fetched_metrics > 0,
+        metrics_by_integration=metrics_collection,
+        summary={
+            "total_integrations_synced_successfully": total_fetched_metrics,
+            "total_integrations_with_errors": len(integrations) - total_fetched_metrics
+        }
+    )
