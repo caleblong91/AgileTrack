@@ -90,11 +90,12 @@ class TestTrelloIntegrationCaching:
         integration = TrelloIntegration(api_key="key", api_secret="secret", token="token")
 
         # Construct the expected cache key
-        # Format: "calculate_metrics:BOARD_ID:days=DAYS"
-        expected_cache_key = f"calculate_metrics:{board_id_for_cache_test}:days={days_for_cache_test}"
+        # New key format: ClassName:function_name:board_id:BOARD_ID_VAL:days:DAYS_VAL
+        expected_cache_key = f"TrelloIntegration:calculate_metrics:board_id:{board_id_for_cache_test}:days={days_for_cache_test}"
 
         # Ensure cache is clean before test
-        redis_client_instance.delete(expected_cache_key)
+        deleted_count = redis_client_instance.delete(expected_cache_key)
+        print(f"Attempted to delete key {expected_cache_key}, deleted: {deleted_count}")
         
         # First call - should hit API and cache the result
         print(f"First call for Trello board {board_id_for_cache_test} (cache key: {expected_cache_key})")

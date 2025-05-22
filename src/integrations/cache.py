@@ -2,6 +2,7 @@ import os
 import redis
 import json
 import functools
+import inspect # Import inspect
 from typing import Callable, Any
 
 # Initialize Redis connection
@@ -51,43 +52,48 @@ def redis_cache(ttl_seconds: int = 1800): # Default TTL 30 minutes
                 return func(*args, **kwargs)
 
             # Adjust key generation based on actual method signature
-            # For 'calculate_metrics(self, days=30)' or 'calculate_metrics(self, project_key, days=30)'
+            # New cache key generation using inspect.signature
+            instance = args[0] # Assuming the first argument is 'self'
             
-            instance = args[0]
-            cache_key_parts = [func.__name__]
+            # Start key with class name and function name
+            key_parts = [instance.__class__.__name__, func.__name__]
 
-            # GitHub: uses self.repository_name implicitly
+            # Handle GitHub's repository_name from instance attribute
             if hasattr(instance, 'repository_name') and instance.repository_name:
-                cache_key_parts.append(instance.repository_name)
-            
-            # Jira: project_key is an argument
-            if 'project_key' in kwargs:
-                cache_key_parts.append(str(kwargs['project_key']))
-            elif len(args) > 1 and isinstance(args[1], str): # Assuming project_key is the first arg after self
-                cache_key_parts.append(args[1])
+                key_parts.append(f"repository_name:{instance.repository_name}")
 
-            # Trello: board_id is an argument
-            if 'board_id' in kwargs:
-                cache_key_parts.append(str(kwargs['board_id']))
-            # If board_id is passed as a positional arg (second arg after self)
-            elif len(args) > 1 and (isinstance(args[1], str) and not ('project_key' in kwargs or (len(args) > 1 and isinstance(args[1], str) and func.__name__ != 'calculate_metrics_jira')) ) :
-                 # this check is a bit complex to differentiate between jira's project_key and trello's board_id
-                 # when they are passed as positional arguments.
-                 # A more robust way would be to inspect func signature or use specific decorators.
-                 if func.__qualname__.startswith('TrelloIntegration'): # Check class name
-                    cache_key_parts.append(args[1])
+            sig = inspect.signature(func)
+            try:
+                bound_args = sig.bind(*args, **kwargs)
+            except TypeError as e:
+                # This can happen if a required arg is missing, though FastAPI/Pydantic usually catch this earlier.
+                # Or if *args/**kwargs don't match the signature at all.
+                print(f"Cache key generation error: Could not bind args for {func.__name__}: {e}")
+                # Fallback to a less specific key or re-raise, for now, log and make a simple key
+                key_parts.extend([str(arg) for arg in args[1:]]) # Skip self
+                key_parts.extend([f"{k}:{v}" for k, v in sorted(kwargs.items())])
+                final_cache_key = ":".join(filter(None, key_parts))
+            else:
+                bound_args.apply_defaults()
+                
+                # Iterate over all arguments including 'self'
+                first_param_name = next(iter(sig.parameters)) # Get the name of the first parameter (usually 'self')
+                
+                for name, value in bound_args.arguments.items():
+                    if name == first_param_name: # Skip 'self' as its class is already in key_parts
+                        continue
+                    
+                    # Only include relevant arguments by name for the cache key
+                    # These are typically the ones that define the scope of the data being fetched.
+                    if name in ['project_key', 'board_id', 'days'] and value is not None:
+                        key_parts.append(f"{name}:{str(value)}")
+                    # Example for other potential args, if any, that should be part of the key:
+                    # elif name == 'another_relevant_arg' and value is not None:
+                    #     key_parts.append(f"{name}:{str(value)}")
 
+                final_cache_key = ":".join(filter(None, key_parts))
 
-            # Add 'days' argument if present
-            if 'days' in kwargs:
-                cache_key_parts.append(f"days={kwargs['days']}")
-            elif len(args) > 2 and isinstance(args[2], int): # days is the second arg after self, project_key/board_id
-                 cache_key_parts.append(f"days={args[2]}")
-            elif len(args) > 1 and isinstance(args[1], int) and not ( hasattr(instance, 'repository_name') and instance.repository_name ): # days is the first arg after self (for github)
-                 cache_key_parts.append(f"days={args[1]}")
-
-
-            final_cache_key = ":".join(filter(None, cache_key_parts))
+            print(f"Generated cache key for {func.__name__}: {final_cache_key}")
             
             try:
                 cached_result = redis_client.get(final_cache_key)
