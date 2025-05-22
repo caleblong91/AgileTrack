@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query # Added Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.sql import func # Added func
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import random
+import asyncio # Import asyncio
 
 from src.backend.database import get_db
 from src.models.team import Team
 from src.models.project import Project
 from src.models.integration import Integration
-from src.backend.routes.integrations import get_metrics
+from src.backend.routes.integrations import get_metrics, MetricsRequest # Import MetricsRequest
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -29,6 +31,11 @@ class TeamResponse(TeamBase):
     
     class Config:
         orm_mode = True
+
+# New Pydantic model for paginated Team response
+class PaginatedTeamsResponse(BaseModel):
+    total_count: int
+    items: List[TeamResponse]
 
 class ProjectBrief(BaseModel):
     id: int
@@ -106,11 +113,16 @@ def generate_mock_metrics(team_id: int) -> Dict[str, Any]:
     }
 
 # Routes
-@router.get("/", response_model=List[TeamResponse])
-async def get_teams(db: Session = Depends(get_db)):
-    """Get all teams"""
-    teams = db.query(Team).all()
-    return teams
+@router.get("/", response_model=PaginatedTeamsResponse)
+async def get_teams(
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(100, ge=1, le=200, description="Number of items to return per page (max 200)")
+):
+    """Get all teams with pagination"""
+    total_count = db.query(func.count(Team.id)).scalar()
+    teams = db.query(Team).offset(skip).limit(limit).all()
+    return PaginatedTeamsResponse(total_count=total_count, items=teams)
 
 @router.post("/", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
 async def create_team(team: TeamCreate, db: Session = Depends(get_db)):
@@ -232,33 +244,86 @@ async def get_team_metrics(team_id: int, db: Session = Depends(get_db)):
             "integrations_count": 0
         }
     
-    # Collect metrics from all integrations
+    # Collect metrics from all integrations concurrently
     metrics_collection = {}
-    
+    tasks = []
+
     for integration in integrations:
-        try:
-            # Try to get cached metrics first (from last_sync)
-            if integration.last_sync:
-                # Use metrics based on integration type
-                if integration.type.lower() == "github":
-                    # Get GitHub-specific metrics by calling the metrics endpoint
-                    metrics_response = await get_metrics(
-                        integration_id=integration.id,
-                        metrics_request={"days": 30},
-                        db=db
-                    )
-                    if metrics_response and "metrics" in metrics_response:
-                        metrics_collection[integration.id] = {
-                            "source": integration.name,
-                            "type": integration.type,
-                            "data": metrics_response["metrics"]
-                        }
-        except Exception as e:
-            print(f"Error fetching metrics for integration {integration.id}: {str(e)}")
-            continue
-    
+        # Prepare MetricsRequest based on integration type and config
+        project_key = None
+        board_id = None
+        # Default days for team view, can be adjusted if needed
+        days = 30 
+
+        if integration.type.lower() == "jira":
+            project_key = integration.config.get("project_key") if integration.config else None
+            # If project_key is essential and not found, we might skip or handle error later
+            if not project_key:
+                print(f"Warning: project_key not found in config for Jira integration ID {integration.id}. Metrics might be incomplete or fail.")
+        elif integration.type.lower() == "trello":
+            board_id = integration.config.get("board_id") if integration.config else None
+            if not board_id:
+                 print(f"Warning: board_id not found in config for Trello integration ID {integration.id}. Metrics might be incomplete or fail.")
+        
+        # All integrations (including GitHub) will get 'days'. Jira/Trello add their specific keys.
+        current_metrics_request = MetricsRequest(days=days, project_key=project_key, board_id=board_id)
+        
+        # Append the coroutine to tasks list
+        # The get_metrics function from integrations.py is already async
+        tasks.append(
+            get_metrics(
+                integration_id=integration.id,
+                metrics_request=current_metrics_request,
+                db=db
+            )
+        )
+
+    # Run all tasks concurrently
+    # return_exceptions=True allows us to handle errors for individual calls
+    print(f"Gathering metrics for {len(tasks)} integrations concurrently for team {team_id}")
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    print(f"Finished gathering metrics for team {team_id}. Received {len(results)} results.")
+
+    for i, result in enumerate(results):
+        integration = integrations[i] # Correlate result with its integration
+        if isinstance(result, Exception):
+            print(f"Error fetching metrics for integration {integration.id} ({integration.name}): {str(result)}")
+            # Optionally, store error information in metrics_collection
+            metrics_collection[integration.id] = {
+                "source": integration.name,
+                "type": integration.type,
+                "error": str(result),
+                "data": {} # Ensure data key exists
+            }
+        elif result and "metrics" in result: # result is a dict from MetricsResponse model (or similar structure if get_metrics returns dict directly)
+            metrics_data = result["metrics"]
+            # Check if metrics_data itself has an error key (application-level error from get_metrics)
+            if isinstance(metrics_data, dict) and "error" in metrics_data:
+                 print(f"Application error fetching metrics for integration {integration.id} ({integration.name}): {metrics_data['error']}")
+                 metrics_collection[integration.id] = {
+                    "source": integration.name,
+                    "type": integration.type,
+                    "error": metrics_data['error'],
+                    "data": {}
+                }
+            else:
+                metrics_collection[integration.id] = {
+                    "source": integration.name,
+                    "type": integration.type,
+                    "data": metrics_data
+                }
+        else:
+            # Handle unexpected result structure
+            print(f"Unexpected result structure for integration {integration.id}: {result}")
+            metrics_collection[integration.id] = {
+                "source": integration.name,
+                "type": integration.type,
+                "error": "Unexpected result structure from metrics fetch.",
+                "data": {}
+            }
+            
     # Transform the metrics into a standardized dashboard format
-    velocity_data = []
+    # velocity_data = [] # Keep if used later, otherwise remove
     quality_data = []
     team_metrics = {
         "team_id": team_id,

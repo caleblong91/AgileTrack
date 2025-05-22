@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react'; // Imported useMemo, useCallback
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+// REMOVED: import axios from 'axios';
+import api from '../../services/api'; // IMPORTED global api instance
 
 // Charts
 import { Line, Bar, Radar } from 'react-chartjs-2';
@@ -40,55 +41,73 @@ const TeamDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // API instance with auth token
-  const api = axios.create({
-    baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${localStorage.getItem('token')}`
-    }
-  });
+  // REMOVED: Local API instance with auth token
+  // const api = axios.create({
+  //   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //     'Authorization': `Bearer ${localStorage.getItem('token')}`
+  //   }
+  // });
 
   useEffect(() => {
     const fetchTeamData = async () => {
+      setLoading(true);
+      setError(null); // Reset error state on new fetch
+
       try {
-        setLoading(true);
-        
-        // Fetch team details
-        const teamResponse = await api.get(`/teams/${id}`);
-        setTeam(teamResponse.data);
-        
-        try {
-          // Fetch team projects
-          const projectsResponse = await api.get(`/teams/${id}/projects`);
-          setProjects(projectsResponse.data || []);
-        } catch (projectsError) {
-          console.error('Error fetching projects:', projectsError);
-          setProjects([]);
+        const promises = [
+          api.get(`/teams/${id}`),           // 0: Team details
+          api.get(`/teams/${id}/projects`),    // 1: Team projects
+          api.get(`/teams/${id}/integrations`),// 2: Team integrations
+          api.get(`/teams/${id}/metrics`)      // 3: Team metrics
+        ];
+
+        // Use Promise.allSettled to ensure all promises complete, even if some fail
+        // This allows us to get partial data if, for example, metrics fail but team details succeed.
+        const results = await Promise.allSettled(promises);
+
+        // Process team details (critical)
+        if (results[0].status === 'fulfilled') {
+          setTeam(results[0].value.data);
+        } else {
+          // If team details fail, it's a critical error for this page
+          console.error('Error fetching team details:', results[0].reason);
+          setError(`Failed to load essential team details: ${results[0].reason?.response?.data?.detail || results[0].reason?.message || 'Unknown error'}`);
+          setLoading(false);
+          return; // Stop further processing if team details fail
         }
-        
-        try {
-          // Fetch team integrations
-          const integrationsResponse = await api.get(`/teams/${id}/integrations`);
-          setIntegrations(integrationsResponse.data || []);
-        } catch (integrationError) {
-          console.error('Error fetching integrations:', integrationError);
-          setIntegrations([]);
+
+        // Process projects
+        if (results[1].status === 'fulfilled') {
+          setProjects(results[1].value.data || []);
+        } else {
+          console.error('Error fetching projects:', results[1].reason);
+          setProjects([]); // Set to empty array on error
         }
-        
-        try {
-          // Fetch team metrics
-          const metricsResponse = await api.get(`/teams/${id}/metrics`);
-          setMetrics(metricsResponse.data || null);
-        } catch (metricsError) {
-          console.error('Error fetching metrics:', metricsError);
-          setMetrics(null);
+
+        // Process integrations
+        if (results[2].status === 'fulfilled') {
+          setIntegrations(results[2].value.data || []);
+        } else {
+          console.error('Error fetching integrations:', results[2].reason);
+          setIntegrations([]); // Set to empty array on error
         }
-        
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching team details:', error);
-        setError('Failed to load team details. Please try again later.');
+
+        // Process metrics
+        if (results[3].status === 'fulfilled') {
+          setMetrics(results[3].value.data || null);
+        } else {
+          console.error('Error fetching metrics:', results[3].reason);
+          setMetrics(null); // Set to null on error
+        }
+
+      } catch (err) {
+        // This catch block is for errors not directly from Promise.allSettled (e.g., issues setting up promises)
+        // or if we were using Promise.all and a critical error occurred.
+        console.error('Unexpected error during fetchTeamData:', err);
+        setError('An unexpected error occurred. Please try again later.');
+      } finally {
         setLoading(false);
       }
     };
@@ -136,34 +155,31 @@ const TeamDetail = () => {
   const integrationsArray = Array.isArray(integrations) ? integrations : [];
   const projectsArray = Array.isArray(projects) ? projects : [];
 
-  // Default metrics data structure if real data isn't available yet
-  const metricsData = metrics || {
-    velocity: [0, 0, 0, 0, 0],
-    burndown: [0, 0, 0, 0, 0],
-    cycletime: [0, 0, 0, 0, 0],
-    sprints: ['Sprint 1', 'Sprint 2', 'Sprint 3', 'Sprint 4', 'Sprint 5'],
-    maturity_metrics: {
-      collaboration_score: 0,
-      technical_practices_score: 0,
-      delivery_predictability: 0,
-      quality_score: 0,
-      overall_maturity: 0
-    }
-  };
-
-  // Make sure maturity_metrics is defined
-  if (!metricsData.maturity_metrics) {
-    metricsData.maturity_metrics = {
-      collaboration_score: 0,
-      technical_practices_score: 0,
-      delivery_predictability: 0,
-      quality_score: 0,
-      overall_maturity: 0
+  // Memoize metricsData to prevent re-computation if metrics prop hasn't changed
+  const metricsData = useMemo(() => {
+    const defaultMetrics = {
+      velocity: [0, 0, 0, 0, 0],
+      burndown: [0, 0, 0, 0, 0],
+      cycletime: [0, 0, 0, 0, 0],
+      sprints: ['Sprint 1', 'Sprint 2', 'Sprint 3', 'Sprint 4', 'Sprint 5'],
+      maturity_metrics: {
+        collaboration_score: 0,
+        technical_practices_score: 0,
+        delivery_predictability: 0,
+        quality_score: 0,
+        overall_maturity: 0
+      }
     };
-  }
+    // Ensure maturity_metrics is always defined
+    const currentMetrics = metrics || defaultMetrics;
+    if (!currentMetrics.maturity_metrics) {
+      currentMetrics.maturity_metrics = defaultMetrics.maturity_metrics;
+    }
+    return currentMetrics;
+  }, [metrics]);
 
-  // Get maturity level color
-  const getMaturityColor = (level) => {
+  // Get maturity level color - useCallback as it's a pure function
+  const getMaturityColor = useCallback((level) => {
     switch (Math.round(level)) {
       case 1: return 'bg-danger';
       case 2: return 'bg-warning';
@@ -172,10 +188,10 @@ const TeamDetail = () => {
       case 5: return 'bg-success';
       default: return 'bg-secondary';
     }
-  };
+  }, []); // Empty dependency array as it has no external dependencies
   
-  // Get maturity level text
-  const getMaturityText = (level) => {
+  // Get maturity level text - useCallback
+  const getMaturityText = useCallback((level) => {
     switch (Math.round(level)) {
       case 1: return 'Initial';
       case 2: return 'Emerging';
@@ -184,10 +200,10 @@ const TeamDetail = () => {
       case 5: return 'Optimizing';
       default: return 'Unknown';
     }
-  };
+  }, []); // Empty dependency array
 
-  // Chart data
-  const velocityData = {
+  // Chart data - memoized
+  const velocityData = useMemo(() => ({
     labels: metricsData.sprints || ['Sprint 1', 'Sprint 2', 'Sprint 3', 'Sprint 4', 'Sprint 5'],
     datasets: [
       {
@@ -198,9 +214,9 @@ const TeamDetail = () => {
         borderColor: 'rgba(75,192,192,1)',
       },
     ],
-  };
+  }), [metricsData]);
 
-  const burndownData = {
+  const burndownData = useMemo(() => ({
     labels: metricsData.sprints || ['Sprint 1', 'Sprint 2', 'Sprint 3', 'Sprint 4', 'Sprint 5'],
     datasets: [
       {
@@ -209,9 +225,9 @@ const TeamDetail = () => {
         backgroundColor: 'rgba(255, 99, 132, 0.5)',
       },
     ],
-  };
+  }), [metricsData]);
   
-  const maturityData = {
+  const maturityData = useMemo(() => ({
     labels: [
       'Collaboration',
       'Technical Practices',
@@ -238,9 +254,9 @@ const TeamDetail = () => {
         fill: true
       }
     ]
-  };
+  }), [metricsData]);
   
-  // Radar chart options
+  // Radar chart options - this is static, so no useMemo needed unless it becomes dynamic or complex
   const radarOptions = {
     scales: {
       r: {
@@ -253,13 +269,26 @@ const TeamDetail = () => {
     }
   };
 
-  const averageVelocity = metricsData.velocity && metricsData.velocity.length > 0
-    ? Math.round(metricsData.velocity.reduce((a, b) => a + b, 0) / metricsData.velocity.length)
-    : 0;
+  const averageVelocity = useMemo(() => (
+    metricsData.velocity && metricsData.velocity.length > 0
+      ? Math.round(metricsData.velocity.reduce((a, b) => a + b, 0) / metricsData.velocity.length)
+      : 0
+  ), [metricsData.velocity]);
     
-  const latestCycleTime = metricsData.cycletime && metricsData.cycletime.length > 0
-    ? metricsData.cycletime[metricsData.cycletime.length - 1]
-    : 0;
+  const latestCycleTime = useMemo(() => (
+    metricsData.cycletime && metricsData.cycletime.length > 0
+      ? metricsData.cycletime[metricsData.cycletime.length - 1]
+      : 0
+  ), [metricsData.cycletime]);
+
+  // Memoize recommended focus areas
+  const recommendedFocusAreas = useMemo(() => {
+    // Ensure maturity_metrics exists before trying to access it
+    if (!metricsData.maturity_metrics) return []; 
+    return Object.entries(metricsData.maturity_metrics)
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 2);
+  }, [metricsData.maturity_metrics]);
 
   return (
     <div className="team-detail">
@@ -350,17 +379,12 @@ const TeamDetail = () => {
             <div className="card-body">
               <h5 className="card-title">Recommended Focus Areas</h5>
               <ul className="list-group list-group-flush">
-                {/* Find the lowest maturity metric */}
-                {metricsData.maturity_metrics && Object.entries(metricsData.maturity_metrics)
-                  .sort((a, b) => a[1] - b[1])
-                  .slice(0, 2)
-                  .map(([key, value], idx) => (
-                    <li key={idx} className="list-group-item d-flex justify-content-between align-items-center">
-                      {key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
-                      <span className={`badge ${getMaturityColor(value)} rounded-pill`}>{value.toFixed(1)}</span>
-                    </li>
-                  ))
-                }
+                {recommendedFocusAreas.map(([key, value], idx) => (
+                  <li key={idx} className="list-group-item d-flex justify-content-between align-items-center">
+                    {key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                    <span className={`badge ${getMaturityColor(value)} rounded-pill`}>{value.toFixed(1)}</span>
+                  </li>
+                ))}
               </ul>
             </div>
           </div>

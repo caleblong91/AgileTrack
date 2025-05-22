@@ -2,6 +2,7 @@ import os
 from github import Github
 from datetime import datetime, timedelta, timezone
 import pandas as pd
+from .cache import redis_cache # Import the decorator
 
 class GitHubIntegration:
     def __init__(self, api_token=None, repository=None):
@@ -113,9 +114,10 @@ class GitHubIntegration:
             
         return pd.DataFrame(issue_data)
     
+    @redis_cache(ttl_seconds=1800) # Cache for 30 minutes
     def calculate_metrics(self, days=30):
         """Calculate metrics from GitHub data"""
-        print(f"Calculating GitHub metrics for repository {self.repository_name} over {days} days")
+        print(f"Calculating GitHub metrics for repository {self.repository_name} over {days} days (cacheable)")
         
         try:
             prs = self.get_pull_requests(days=days)

@@ -2,6 +2,7 @@ import os
 from jira import JIRA
 from datetime import datetime, timedelta
 import pandas as pd
+from .cache import redis_cache # Import the decorator
 
 class JiraIntegration:
     def __init__(self, server=None, username=None, api_token=None):
