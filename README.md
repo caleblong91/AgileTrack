@@ -38,6 +38,18 @@ AgileTrack follows a modern microservices architecture pattern:
 4. **Background Tasks**: Celery with Redis for async data processing
 5. **Integration Layer**: Adapters for external services like GitHub, Jira, and Trello
 
+## Documentation
+
+AgileTrack's documentation is split into several focused guides:
+
+- [Authentication Guide](AUTHENTICATION.md) - JWT-based auth system, token management, and security
+- [Caching System](CACHING.md) - Multi-level caching strategy and implementation
+- [Integrations Guide](INTEGRATIONS.md) - External service connections and metrics collection
+- [Metrics Guide](METRICS.md) - Agile maturity scoring and performance metrics
+- [API Documentation](API.md) - API endpoints, formats, and usage
+- [Deployment Guide](DEPLOYMENT.md) - Production deployment and scaling
+- [Celery Tasks](CELERY.md) - Background task processing and scheduling
+
 ## Features
 
 - **Multi-source Integration**: Connect with GitHub, Jira, Trello, and more
