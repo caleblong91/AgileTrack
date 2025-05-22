@@ -10,6 +10,7 @@
     - [How Celery Helps](#how-celery-helps)
     - [Real-World Example](#real-world-example)
     - [The Benefits](#the-benefits)
+    - [Celery and Caching](#celery-and-caching)
   - [Architecture Overview](#architecture-overview)
   - [Task Flow](#task-flow)
   - [Configuration](#configuration)
@@ -66,6 +67,38 @@ Let's say you connect your GitHub repository to AgileTrack:
 - **Reliability**: Tasks are retried if they fail
 - **Scalability**: We can process multiple tasks simultaneously
 - **Consistency**: Regular updates of your team's metrics
+
+### Celery and Caching
+Celery provides built-in caching capabilities that help improve performance:
+
+1. **Result Backend Caching**
+   - When a task completes, its result is stored in Redis
+   - Results are cached for a configurable time period
+   - This prevents unnecessary re-computation of the same data
+   - Example: If we fetch GitHub metrics, the results are cached for 1 hour
+
+2. **Task Result Caching**
+   ```python
+   @app.task(bind=True, cache_backend='redis')
+   def fetch_github_metrics(self, repo_id):
+       # Task implementation
+   ```
+   - Task results are automatically cached
+   - Subsequent calls with the same parameters return cached results
+   - Configurable cache expiration times
+   - Helps reduce load on external APIs
+
+3. **Integration with Our Caching System**
+   - Celery's caching works alongside our application's caching:
+     - Frontend: Local storage and in-memory cache
+     - Backend: Redis for Celery results
+     - Database: Cached queries for frequently accessed data
+
+4. **Cache Invalidation**
+   - Automatic cache invalidation when data changes
+   - Manual cache clearing when needed
+   - Configurable cache timeouts per task type
+   - Example: GitHub metrics cache is cleared when new commits are pushed
 
 ## Architecture Overview
 
