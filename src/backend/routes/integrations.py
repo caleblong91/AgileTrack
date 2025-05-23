@@ -10,6 +10,7 @@ from src.models.integration import Integration
 from src.models.project import Project
 from src.integrations.integration_factory import IntegrationFactory
 from src.integrations.trello_integration import TrelloIntegration
+from src.integrations.github_integration import GitHubIntegration
 from src.backend.tasks import initial_sync_metrics_task # Import the Celery task
 from src.models.metric import Metric
 
