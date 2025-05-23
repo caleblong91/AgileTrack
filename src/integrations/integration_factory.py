@@ -44,8 +44,10 @@ class IntegrationFactory:
                 api_token=config.get("api_token") or config.get("token") or config.get("api_key")
             )
         elif integration_type == "trello":
+            # Get API key from config, falling back to api_token if not found
+            api_key = config.get("api_key") or config.get("api_token")
             return TrelloIntegration(
-                api_key=config.get("api_key") or config.get("api_token"),
+                api_key=api_key,
                 api_secret=config.get("api_secret"),
                 token=config.get("token")
             )

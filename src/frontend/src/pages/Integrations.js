@@ -14,7 +14,9 @@ const Integrations = () => {
     name: '',
     apiKey: '',
     repository: '',
-    teamId: ''  // Add team ID field
+    board: '',  // Add board field for Trello
+    token: '',  // Add token field for Trello
+    teamId: ''
   });
   const [editIntegration, setEditIntegration] = useState({
     id: null,
@@ -22,17 +24,43 @@ const Integrations = () => {
     name: '',
     apiKey: '',
     repository: '',
-    teamId: ''  // Add team ID field
+    token: '',  // Add token field for Trello
+    teamId: ''
   });
   const [loading, setLoading] = useState(false);
   const [teamsLoading, setTeamsLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
   const [repositories, setRepositories] = useState([]);
   const [fetchingRepos, setFetchingRepos] = useState(false);
+  const [trelloBoards, setTrelloBoards] = useState([]);
+  const [fetchingBoards, setFetchingBoards] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [selectedIntegrationType, setSelectedIntegrationType] = useState(null);
 
   // Load integrations from AuthContext when component mounts
   useEffect(() => {
-    setIntegrations(contextIntegrations);
+    console.log('Context integrations:', contextIntegrations);
+    // Ensure we have a valid array and handle potential null/undefined values
+    const safeIntegrations = Array.isArray(contextIntegrations) ? contextIntegrations : [];
+    console.log('Setting safe integrations:', safeIntegrations);
+    setIntegrations(safeIntegrations);
+    
+    // If we don't have any integrations, try to fetch them directly
+    if (!safeIntegrations.length) {
+      console.log('No integrations found in context, fetching directly...');
+      api.get('/integrations')
+        .then(response => {
+          const integrationsData = response.data?.items || response.data || [];
+          console.log('Directly fetched integrations:', integrationsData);
+          if (Array.isArray(integrationsData)) {
+            setIntegrations(integrationsData);
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching integrations directly:', error);
+        });
+    }
+    
     // Fetch available teams when component mounts
     fetchTeams();
   }, [contextIntegrations]);
@@ -42,16 +70,24 @@ const Integrations = () => {
     setTeamsLoading(true);
     try {
       const response = await api.get('/teams');
-      if (response.data) {
-        setTeams(response.data);
+      // Handle both array and object responses
+      const teamsData = response.data?.items || response.data || [];
+      console.log('Fetched teams data:', teamsData);
+      
+      // Ensure we have a valid array
+      if (Array.isArray(teamsData)) {
+        setTeams(teamsData);
         
         // If we have teams, set the first one as default for new integrations
-        if (response.data.length > 0) {
+        if (teamsData.length > 0) {
           setNewIntegration(prev => ({ 
             ...prev, 
-            teamId: response.data[0].id.toString() 
+            teamId: teamsData[0].id.toString() 
           }));
         }
+      } else {
+        console.error('Invalid teams data received:', teamsData);
+        setTeams([]);
       }
     } catch (error) {
       console.error('Error fetching teams:', error);
@@ -59,6 +95,7 @@ const Integrations = () => {
         text: 'Failed to fetch teams: ' + (error.response?.data?.detail || 'Unknown error'),
         type: 'danger'
       });
+      setTeams([]);
     } finally {
       setTeamsLoading(false);
     }
@@ -98,13 +135,54 @@ const Integrations = () => {
     }
   };
 
+  // Function to fetch Trello boards
+  const fetchTrelloBoards = async (apiKey, token) => {
+    if (!apiKey || apiKey === '************') return;
+    
+    setFetchingBoards(true);
+    setMessage(prevMessage => ({
+      ...prevMessage,
+      text: prevMessage.text && prevMessage.type === 'danger' ? '' : prevMessage.text,
+      type: prevMessage.type === 'danger' ? '' : prevMessage.type
+    }));
+    
+    try {
+      console.log('Fetching Trello boards with API key length:', apiKey.length);
+      const response = await api.post('/integrations/trello/boards', { 
+        api_key: apiKey,
+        token: token
+      });
+      
+      if (response.data && response.data.boards) {
+        console.log(`Found ${response.data.boards.length} boards`);
+        setTrelloBoards(response.data.boards);
+      } else {
+        console.log('No boards found in response:', response.data);
+        setTrelloBoards([]);
+      }
+    } catch (error) {
+      console.error('Error fetching boards:', error);
+      setMessage({
+        text: 'Failed to fetch boards: ' + (error.response?.data?.detail || error.message || 'Please check your API key and token'),
+        type: 'danger'
+      });
+      setTrelloBoards([]);
+    } finally {
+      setFetchingBoards(false);
+    }
+  };
+
   // Listen for API key changes in Add form
   useEffect(() => {
     // Only fetch when adding GitHub integration and API key changes
     if (newIntegration.type === 'github' && newIntegration.apiKey && newIntegration.apiKey.length > 20) {
       fetchGitHubRepositories(newIntegration.apiKey);
     }
-  }, [newIntegration.type, newIntegration.apiKey]);
+    // Fetch Trello boards when adding Trello integration and API key or token changes
+    else if (newIntegration.type === 'trello' && newIntegration.apiKey && newIntegration.token) {
+      fetchTrelloBoards(newIntegration.apiKey, newIntegration.token);
+    }
+  }, [newIntegration.type, newIntegration.apiKey, newIntegration.token]);
 
   // Handle API key change in Edit form
   const handleEditApiKeyChange = (e) => {
@@ -121,6 +199,25 @@ const Integrations = () => {
       console.log('Calling fetchGitHubRepositories from handleEditApiKeyChange');
       fetchGitHubRepositories(newApiKey);
     }
+    // Fetch Trello boards if it's a Trello integration
+    else if (editIntegration.type === 'trello' && 
+             newApiKey !== '************' &&
+             editIntegration.token) {
+      fetchTrelloBoards(newApiKey, editIntegration.token);
+    }
+  };
+
+  // Add handler for token changes
+  const handleTokenChange = (e) => {
+    const newToken = e.target.value;
+    setEditIntegration({...editIntegration, token: newToken});
+    
+    // Fetch Trello boards if it's a Trello integration and we have both API key and token
+    if (editIntegration.type === 'trello' && 
+        editIntegration.apiKey !== '************' &&
+        newToken) {
+      fetchTrelloBoards(editIntegration.apiKey, newToken);
+    }
   };
 
   const handleAddIntegration = async (e) => {
@@ -130,19 +227,16 @@ const Integrations = () => {
     try {
       // Create integration data object
       const integrationData = {
+        name: newIntegration.name,
         type: newIntegration.type,
-        name: newIntegration.name || `${newIntegration.type} Integration`,
         api_key: newIntegration.apiKey,
-        team_id: parseInt(newIntegration.teamId),  // Send team ID
-        project_id: parseInt(newIntegration.teamId)  // Also send as project_id for backend compatibility
+        project_id: newIntegration.projectId,
+        team_id: newIntegration.teamId,
+        config: {
+          ...(newIntegration.type === 'github' ? { repository: newIntegration.repository } : {}),
+          ...(newIntegration.type === 'trello' ? { board_id: newIntegration.board, token: newIntegration.token } : {})
+        }
       };
-      
-      // Add config for GitHub integrations
-      if (newIntegration.type === 'github' && newIntegration.repository) {
-        integrationData.config = {
-          repository: newIntegration.repository
-        };
-      }
       
       console.log('Creating integration with data:', {...integrationData, api_key: 'MASKED'});
       
@@ -151,13 +245,14 @@ const Integrations = () => {
       
       if (response.data) {
         // Add team_id to the response data if it's missing
-        const newIntegration = {
+        const newIntegrationData = {
           ...response.data,
-          team_id: parseInt(integrationData.team_id)
+          team_id: parseInt(integrationData.team_id),
+          config: integrationData.config // Ensure we preserve the config
         };
         
         // Add to local state
-        setIntegrations([...integrations, newIntegration]);
+        setIntegrations([...integrations, newIntegrationData]);
         
         setMessage({
           text: 'Integration added successfully',
@@ -171,6 +266,8 @@ const Integrations = () => {
         name: '', 
         apiKey: '', 
         repository: '', 
+        board: '',
+        token: '',
         teamId: teams.length > 0 ? teams[0].id.toString() : '' 
       });
       setRepositories([]);
@@ -197,6 +294,8 @@ const Integrations = () => {
       name: integration.name,
       apiKey: '************', // Mask the API key for security
       repository: integration.config?.repository || '', // Get repository from config if available
+      board: integration.config?.board_id || '', // Get board_id from config if available
+      token: integration.config?.token || '',  // Get token from config if available
       teamId: teamId ? teamId.toString() : ''
     });
     
@@ -218,17 +317,13 @@ const Integrations = () => {
       const updateData = {
         name: editIntegration.name,
         type: editIntegration.type,
+        api_key: editIntegration.apiKey,
         project_id: parseInt(editIntegration.teamId),  // Backend still expects project_id, not team_id
-        api_key: editIntegration.apiKey !== '************' 
-          ? editIntegration.apiKey 
-          : currentIntegration.api_key || 'placeholder_key', // Backend requires api_key field
+        team_id: parseInt(editIntegration.teamId),
         config: {
-          ...currentIntegration.config, // Preserve existing config
-          repository: editIntegration.repository // Add/update repository
-        },
-        // Include optional fields with null values to satisfy the model
-        api_url: currentIntegration.api_url || null,
-        username: currentIntegration.username || null
+          ...(editIntegration.type === 'github' ? { repository: editIntegration.repository } : {}),
+          ...(editIntegration.type === 'trello' ? { board_id: editIntegration.board, token: editIntegration.token } : {})
+        }
       };
       
       console.log('Sending update data:', {...updateData, api_key: updateData.api_key ? 'MASKED' : 'EMPTY'});
@@ -243,10 +338,7 @@ const Integrations = () => {
               name: editIntegration.name, 
               type: editIntegration.type,
               team_id: parseInt(editIntegration.teamId),
-              config: {
-                ...integration.config,
-                repository: editIntegration.repository
-              }
+              config: updateData.config // Use the same config we sent to the API
             }
           : integration
       ));
@@ -277,47 +369,54 @@ const Integrations = () => {
   };
 
   const handleSyncIntegration = async (integration) => {
-    setLoading(true);
-    
     try {
-      // Call the metrics endpoint to trigger a sync
-      const response = await api.post(`/integrations/${integration.id}/metrics`, {
-        days: 30 // Default to 30 days of data
-      });
+      console.log('Starting sync for integration:', integration);
       
-      // Check if there was an error in the metrics
-      if (response.data.metrics && response.data.metrics.error) {
-        let errorMessage = response.data.metrics.error;
-        let errorType = 'warning';
-        
-        // Check for specific error messages and provide more helpful context
-        if (errorMessage.includes("GitHub repository is empty")) {
-          errorType = 'info';
-          errorMessage = `${errorMessage} You'll need to push code to "${integration.config?.repository || 'your repository'}" before metrics can be collected.`;
-        }
-        
-        setMessage({
-          text: `Sync issue: ${errorMessage}`,
-          type: errorType
-        });
-      } else {
-        setMessage({ 
-          text: `Synced "${integration.name}" successfully`, 
-          type: 'success' 
-        });
+      // Get the latest integration data
+      const response = await api.get(`/integrations/${integration.id}`);
+      const integrationData = response.data;
+      console.log('Latest integration data:', integrationData);
+      
+      // Ensure we have a config object
+      const config = integrationData.config || {};
+      
+      // Prepare metrics request data based on integration type
+      const metricsRequestData = {
+        days: 30
+      };
+      
+      if (integrationData.type === 'trello') {
+        metricsRequestData.board_id = config.board_id || integrationData.board_id;
+      } else if (integrationData.type === 'jira') {
+        metricsRequestData.project_key = config.project_key || integrationData.project_key;
       }
       
-      // Refresh integrations list
-      const integrationsResponse = await api.get('/integrations');
-      setIntegrations(integrationsResponse.data);
+      console.log('Metrics request data:', metricsRequestData);
+      
+      // Get metrics
+      const metricsResponse = await api.post(`/integrations/${integration.id}/metrics`, metricsRequestData);
+      console.log('Metrics response:', metricsResponse.data);
+      
+      // Update the integration in the list
+      setIntegrations(prevIntegrations => 
+        prevIntegrations.map(prev => 
+          prev.id === integration.id 
+            ? { ...prev, last_sync: new Date().toISOString() }
+            : prev
+        )
+      );
+      
+      // Show success message
+      setMessage({
+        type: 'success',
+        text: `Successfully synced ${integration.name} integration`
+      });
     } catch (error) {
       console.error('Error syncing integration:', error);
-      setMessage({ 
-        text: 'Failed to sync: ' + (error.response?.data?.detail || 'Unknown error'), 
-        type: 'danger' 
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.detail || 'Failed to sync integration'
       });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -350,6 +449,16 @@ const Integrations = () => {
   };
 
   const handleSyncAll = async () => {
+    // Ensure integrations is an array and not empty
+    if (!Array.isArray(integrations)) {
+      console.error('Integrations is not an array:', integrations);
+      setMessage({
+        text: 'Invalid integrations data',
+        type: 'danger'
+      });
+      return;
+    }
+
     if (integrations.length === 0) {
       setMessage({
         text: 'No integrations to sync',
@@ -370,6 +479,11 @@ const Integrations = () => {
       
       // Sync each integration one by one
       for (const integration of integrations) {
+        if (!integration || !integration.id) {
+          console.warn('Invalid integration object:', integration);
+          continue;
+        }
+
         try {
           const response = await api.post(`/integrations/${integration.id}/metrics`, {
             days: 30 // Default to 30 days of data
@@ -385,17 +499,26 @@ const Integrations = () => {
               errorMessage = `Empty repository: ${integration.config.repository}`;
             }
             
-            errorMessages.push(`${integration.name}: ${errorMessage}`);
+            errorMessages.push(`${integration.name || 'Unnamed'}: ${errorMessage}`);
           }
         } catch (err) {
           hasErrors = true;
-          errorMessages.push(`${integration.name}: ${err.response?.data?.detail || 'Failed to sync'}`);
+          errorMessages.push(`${integration.name || 'Unnamed'}: ${err.response?.data?.detail || 'Failed to sync'}`);
         }
       }
       
       // Refresh the list
       const response = await api.get('/integrations');
-      setIntegrations(response.data);
+      if (Array.isArray(response.data)) {
+        setIntegrations(response.data);
+      } else {
+        console.error('Invalid response data:', response.data);
+        setMessage({
+          text: 'Failed to refresh integrations list: Invalid response format',
+          type: 'danger'
+        });
+        return;
+      }
       
       if (hasErrors) {
         setMessage({
@@ -417,6 +540,170 @@ const Integrations = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Add this before the return statement
+  console.log('Current integrations state:', integrations);
+
+  // Add function to get API key instructions
+  const getApiKeyInstructions = (type) => {
+    switch(type) {
+      case 'github':
+        return (
+          <>
+            <h5>How to set up GitHub Integration:</h5>
+            <ol className="mt-3">
+              <li>
+                <strong>Get your Personal Access Token:</strong>
+                <ol>
+                  <li>Log in to your GitHub account</li>
+                  <li>Go to <b>Settings</b> &gt; <b>Developer settings</b> &gt; <b>Personal access tokens</b></li>
+                  <li>Click <b>Generate new token</b> (Classic)</li>
+                  <li>Give your token a descriptive name (e.g., "AgileTrack Integration")</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Configure Token Permissions:</strong>
+                <ol>
+                  <li>Set an expiration date (recommended: 1 year)</li>
+                  <li>Select the following scopes:
+                    <ul>
+                      <li><code>repo</code> - Full control of private repositories</li>
+                      <li><code>read:user</code> - Read access to user profile data</li>
+                      <li><code>user:email</code> - Read access to user email addresses</li>
+                    </ul>
+                  </li>
+                  <li>Click <b>Generate token</b></li>
+                </ol>
+              </li>
+              <li>
+                <strong>Use the Token:</strong>
+                <ol>
+                  <li>Copy the token immediately (you won't be able to see it again!)</li>
+                  <li>Paste the token in the API Key field</li>
+                  <li>Your repositories will appear in the dropdown after entering a valid token</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Repository Access:</strong>
+                <ol>
+                  <li>Make sure the token has access to the repositories you want to track</li>
+                  <li>For organization repositories, ensure you have the necessary permissions</li>
+                  <li>The repositories you have access to will appear in the dropdown after entering your token</li>
+                </ol>
+              </li>
+            </ol>
+            <div className="alert alert-info mt-3">
+              <i className="fe fe-info me-2"></i>
+              <strong>Note:</strong> The token grants access to your GitHub account, so keep it secure. You can revoke access at any time from your GitHub settings.
+            </div>
+            <div className="alert alert-warning mt-3">
+              <i className="fe fe-alert-triangle me-2"></i>
+              <strong>Important:</strong> Make sure you have the necessary permissions on the GitHub repositories you want to track. You need at least "Read" access to view repository data.
+            </div>
+          </>
+        );
+      
+      case 'trello':
+        return (
+          <>
+            <h5>How to set up Trello Integration:</h5>
+            <ol className="mt-3">
+              <li>
+                <strong>Get your API Key:</strong>
+                <ol>
+                  <li>Log in to your Trello account</li>
+                  <li>Visit the <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">Trello API Key Generation page</a></li>
+                  <li>Copy the <b>API Key</b> shown at the top of the page</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Generate a Token:</strong>
+                <ol>
+                  <li>On the same page, scroll down to the "Token" section</li>
+                  <li>Click the link that says <b>"Token"</b> (it will be a clickable link)</li>
+                  <li>You'll be asked to authorize the application - click <b>"Allow"</b></li>
+                  <li>Copy the <b>Token</b> that appears</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Enter Your Credentials:</strong>
+                <ol>
+                  <li>Paste your API Key in the "API Key" field</li>
+                  <li>Paste your Token in the "Token" field</li>
+                  <li>Your Trello boards will appear in the dropdown after entering both credentials</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Board Access:</strong>
+                <ol>
+                  <li>Make sure you have access to the boards you want to track</li>
+                  <li>You can manage board access in your Trello account settings</li>
+                  <li>The boards you have access to will appear in the dropdown after entering your credentials</li>
+                </ol>
+              </li>
+            </ol>
+            <div className="alert alert-info mt-3">
+              <i className="fe fe-info me-2"></i>
+              <strong>Note:</strong> The token grants access to your Trello account, so keep it secure. You can revoke access at any time from your Trello account settings.
+            </div>
+            <div className="alert alert-warning mt-3">
+              <i className="fe fe-alert-triangle me-2"></i>
+              <strong>Important:</strong> Make sure you have the necessary permissions on the Trello boards you want to track. You need at least "Read" access to view board data.
+            </div>
+          </>
+        );
+      
+      default:
+        return <p>Please select an integration type to see instructions.</p>;
+    }
+  };
+
+  // Add API Key Instructions Modal
+  const renderApiKeyModal = () => {
+    if (!showApiKeyModal) return null;
+
+    return (
+      <>
+        <div 
+          className="modal show d-block" 
+          tabIndex="-1" 
+          role="dialog" 
+          style={{ zIndex: 1050 }}
+        >
+          <div className="modal-dialog modal-lg">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">API Key Instructions</h5>
+                <button 
+                  type="button" 
+                  className="btn-close" 
+                  onClick={() => setShowApiKeyModal(false)}
+                  aria-label="Close"
+                ></button>
+              </div>
+              <div className="modal-body">
+                {getApiKeyInstructions(selectedIntegrationType)}
+              </div>
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-primary"
+                  onClick={() => setShowApiKeyModal(false)}
+                >
+                  Got it
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div 
+          className="modal-backdrop fade show" 
+          style={{ zIndex: 1040 }}
+          onClick={() => setShowApiKeyModal(false)}
+        ></div>
+      </>
+    );
   };
 
   return (
@@ -452,7 +739,7 @@ const Integrations = () => {
         <div className="card-body">
           <h5 className="card-title">Connected Services</h5>
           
-          {integrations.length === 0 ? (
+          {(!integrations || !Array.isArray(integrations) || integrations.length === 0) ? (
             <div className="text-center py-4 text-muted">
               <p>No integrations connected yet.</p>
               <button 
@@ -477,70 +764,80 @@ const Integrations = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {integrations.map(integration => {
-                    // Find the team name for this integration
-                    const teamId = integration.team_id || integration.project_id;
-                    const team = teams.find(t => t.id === teamId);
-                    const teamName = team ? team.name : 'Unknown';
-                    
-                    return (
-                      <tr key={integration.id}>
-                        <td>{integration.name}</td>
-                        <td>{integration.type}</td>
-                        <td>{teamName}</td>
-                        <td>
-                          <span className={`badge ${integration.active ? 'bg-success' : 'bg-secondary'}`}>
-                            {integration.active ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td>{integration.last_sync || 'Never'}</td>
-                        <td>
-                          <button 
-                            className="btn btn-sm btn-outline-primary me-2"
-                            onClick={() => handleSyncIntegration(integration)}
-                            disabled={loading}
-                          >
-                            Sync
-                          </button>
-                          <button 
-                            className="btn btn-sm btn-outline-secondary me-2"
-                            onClick={() => handleEditClick(integration)}
-                            disabled={loading}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-sm btn-outline-danger me-1"
-                            onClick={() => {
-                              if (window.confirm(`Are you sure you want to delete the integration "${integration.name}"?`)) {
-                                api.delete(`/integrations/${integration.id}`)
-                                  .then(() => {
-                                    // Remove from state
-                                    setIntegrations(integrations.filter(i => i.id !== integration.id));
-                                    alert(`Integration "${integration.name}" deleted successfully`);
-                                  })
-                                  .catch(error => {
-                                    console.error('Error deleting integration:', error);
-                                    alert(`Error deleting integration: ${error.response?.data?.detail || error.message}`);
-                                  });
-                              }
-                            }}
-                          >
-                            <i className="fe fe-trash-2"></i> Delete
-                          </button>
-                          {integration.config && !integration.config.repository && integration.type.toLowerCase() === 'github' && (
-                            <button
-                              className="btn btn-sm btn-warning"
-                              onClick={() => handleEditClick(integration)}
-                              title="This GitHub integration needs a repository to be configured"
+                  {(() => {
+                    // Ensure we have a valid array before mapping
+                    const safeIntegrations = Array.isArray(integrations) ? integrations : [];
+                    console.log('Rendering integrations:', safeIntegrations);
+                    return safeIntegrations.map(integration => {
+                      if (!integration || typeof integration !== 'object') {
+                        console.warn('Invalid integration object:', integration);
+                        return null;
+                      }
+                      
+                      // Find the team name for this integration
+                      const teamId = integration.team_id || integration.project_id;
+                      const team = Array.isArray(teams) ? teams.find(t => t.id === teamId) : null;
+                      const teamName = team ? team.name : 'Unknown';
+                      
+                      return (
+                        <tr key={integration.id || Math.random()}>
+                          <td>{integration.name || 'Unnamed'}</td>
+                          <td>{integration.type || 'Unknown'}</td>
+                          <td>{teamName}</td>
+                          <td>
+                            <span className={`badge ${integration.active ? 'bg-success' : 'bg-secondary'}`}>
+                              {integration.active ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                          <td>{integration.last_sync || 'Never'}</td>
+                          <td>
+                            <button 
+                              className="btn btn-sm btn-outline-primary me-2"
+                              onClick={() => handleSyncIntegration(integration)}
+                              disabled={loading}
                             >
-                              <i className="fe fe-alert-triangle"></i> Configure
+                              Sync
                             </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                            <button 
+                              className="btn btn-sm btn-outline-secondary me-2"
+                              onClick={() => handleEditClick(integration)}
+                              disabled={loading}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-sm btn-outline-danger me-1"
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete the integration "${integration.name}"?`)) {
+                                  api.delete(`/integrations/${integration.id}`)
+                                    .then(() => {
+                                      // Remove from state
+                                      setIntegrations(integrations.filter(i => i.id !== integration.id));
+                                      alert(`Integration "${integration.name}" deleted successfully`);
+                                    })
+                                    .catch(error => {
+                                      console.error('Error deleting integration:', error);
+                                      alert(`Error deleting integration: ${error.response?.data?.detail || error.message}`);
+                                    });
+                                }
+                              }}
+                            >
+                              <i className="fe fe-trash-2"></i> Delete
+                            </button>
+                            {integration.config && !integration.config.repository && integration.type.toLowerCase() === 'github' && (
+                              <button
+                                className="btn btn-sm btn-warning"
+                                onClick={() => handleEditClick(integration)}
+                                title="This GitHub integration needs a repository to be configured"
+                              >
+                                <i className="fe fe-alert-triangle"></i> Configure
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    }).filter(Boolean); // Remove any null entries
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -674,6 +971,73 @@ const Integrations = () => {
                       </div>
                     )}
                     
+                    {/* Trello-specific fields */}
+                    {newIntegration.type === 'trello' && (
+                      <>
+                        <div className="mb-3">
+                          <label htmlFor="board" className="form-label">Board</label>
+                          {fetchingBoards ? (
+                            <div className="d-flex align-items-center">
+                              <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                              <span>Loading boards...</span>
+                            </div>
+                          ) : trelloBoards.length > 0 ? (
+                            <>
+                              <select
+                                className="form-select"
+                                id="board"
+                                value={newIntegration.board}
+                                onChange={(e) => setNewIntegration({...newIntegration, board: e.target.value})}
+                                disabled={loading}
+                                required
+                              >
+                                <option value="">Select a board</option>
+                                {trelloBoards.map(board => (
+                                  <option key={board.id} value={board.id}>
+                                    {board.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <small className="form-text text-muted">
+                                Found {trelloBoards.length} boards for your account
+                              </small>
+                            </>
+                          ) : (
+                            <div>
+                              <input 
+                                type="text" 
+                                className="form-control" 
+                                id="board"
+                                value={newIntegration.board}
+                                onChange={(e) => setNewIntegration({...newIntegration, board: e.target.value})}
+                                placeholder="Enter board ID"
+                                disabled={loading}
+                                required
+                              />
+                              <small className="form-text text-muted">
+                                Enter your Trello board ID or enter a valid API key and token to see your boards
+                              </small>
+                            </div>
+                          )}
+                        </div>
+                        <div className="mb-3">
+                          <label htmlFor="token" className="form-label">Token</label>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            id="token"
+                            value={newIntegration.token}
+                            onChange={(e) => setNewIntegration({...newIntegration, token: e.target.value})}
+                            placeholder="Enter your Trello token"
+                            required
+                          />
+                          <small className="form-text text-muted">
+                            Your Trello token is required to access your boards
+                          </small>
+                        </div>
+                      </>
+                    )}
+                    
                     <div className="mb-3">
                       <label htmlFor="apiKey" className="form-label">API Key</label>
                       <input 
@@ -684,8 +1048,19 @@ const Integrations = () => {
                         onChange={(e) => setNewIntegration({...newIntegration, apiKey: e.target.value})}
                         required
                         placeholder="Enter your API key"
-                        disabled={loading}
                       />
+                      <div className="form-text">
+                        <button 
+                          type="button" 
+                          className="btn btn-link p-0 text-decoration-none"
+                          onClick={() => {
+                            setSelectedIntegrationType(newIntegration.type);
+                            setShowApiKeyModal(true);
+                          }}
+                        >
+                          How to get your API key
+                        </button>
+                      </div>
                     </div>
                     <div className="modal-footer">
                       <button 
@@ -844,6 +1219,73 @@ const Integrations = () => {
                       </div>
                     )}
                     
+                    {/* Trello-specific fields in Edit form */}
+                    {editIntegration.type === 'trello' && (
+                      <>
+                        <div className="mb-3">
+                          <label htmlFor="editBoard" className="form-label">Board</label>
+                          {fetchingBoards ? (
+                            <div className="d-flex align-items-center">
+                              <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                              <span>Loading boards...</span>
+                            </div>
+                          ) : trelloBoards.length > 0 ? (
+                            <>
+                              <select
+                                className="form-select"
+                                id="editBoard"
+                                value={editIntegration.board}
+                                onChange={(e) => setEditIntegration({...editIntegration, board: e.target.value})}
+                                disabled={loading}
+                                required
+                              >
+                                <option value="">Select a board</option>
+                                {trelloBoards.map(board => (
+                                  <option key={board.id} value={board.id}>
+                                    {board.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <small className="form-text text-muted">
+                                Found {trelloBoards.length} boards for your account
+                              </small>
+                            </>
+                          ) : (
+                            <div>
+                              <input 
+                                type="text" 
+                                className="form-control" 
+                                id="editBoard"
+                                value={editIntegration.board || ''}
+                                onChange={(e) => setEditIntegration({...editIntegration, board: e.target.value})}
+                                placeholder="Enter board ID"
+                                disabled={loading}
+                                required
+                              />
+                              <small className="form-text text-muted">
+                                Enter your Trello board ID or enter a valid API key and token to see your boards
+                              </small>
+                            </div>
+                          )}
+                        </div>
+                        <div className="mb-3">
+                          <label htmlFor="editToken" className="form-label">Token</label>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            id="editToken"
+                            value={editIntegration.token}
+                            onChange={handleTokenChange}
+                            placeholder="Enter your Trello token"
+                            disabled={loading}
+                          />
+                          <small className="form-text text-muted">
+                            Enter a new token to update it, or leave unchanged to keep the current token
+                          </small>
+                        </div>
+                      </>
+                    )}
+                    
                     <div className="mb-3">
                       <label htmlFor="editApiKey" className="form-label">API Key</label>
                       <input 
@@ -886,6 +1328,8 @@ const Integrations = () => {
           ></div>
         </>
       )}
+
+      {renderApiKeyModal()}
     </div>
   );
 };

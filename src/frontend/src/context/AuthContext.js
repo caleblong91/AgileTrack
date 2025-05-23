@@ -75,9 +75,34 @@ export function AuthProvider({ children }) {
   const fetchIntegrations = async () => {
     try {
       const response = await api.get('/integrations');
-      setIntegrations(response.data);
+      console.log('Integrations response:', response.data);
+      
+      // Handle both array and object responses
+      const integrationsData = response.data?.items || response.data || [];
+      console.log('Processed integrations data:', integrationsData);
+      
+      // Ensure each integration has a config object
+      const processedIntegrations = (Array.isArray(integrationsData) ? integrationsData : []).map(integration => {
+        // If config is undefined or null, initialize it as an empty object
+        const config = integration.config || {};
+        
+        // For Trello integrations, ensure board_id is preserved
+        if (integration.type === 'trello' && integration.board_id && !config.board_id) {
+          config.board_id = integration.board_id;
+        }
+        
+        return {
+          ...integration,
+          config
+        };
+      });
+      
+      console.log('Final processed integrations:', processedIntegrations);
+      setIntegrations(processedIntegrations);
     } catch (error) {
       console.error('Error fetching integrations:', error);
+      // Set empty array on error
+      setIntegrations([]);
     }
   };
 

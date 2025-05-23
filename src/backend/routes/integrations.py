@@ -9,7 +9,9 @@ from src.backend.database import get_db
 from src.models.integration import Integration
 from src.models.project import Project
 from src.integrations.integration_factory import IntegrationFactory
+from src.integrations.trello_integration import TrelloIntegration
 from src.backend.tasks import initial_sync_metrics_task # Import the Celery task
+from src.models.metric import Metric
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -24,6 +26,14 @@ class IntegrationBase(BaseModel):
     
 class IntegrationCreate(IntegrationBase):
     api_key: str
+    config: Optional[Dict[str, Any]] = None
+
+class IntegrationUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    api_key: Optional[str] = None
+    project_id: Optional[int] = None
+    team_id: Optional[int] = None
     config: Optional[Dict[str, Any]] = None
     
 class IntegrationResponse(IntegrationBase):
@@ -61,6 +71,19 @@ class MetricsResponse(BaseModel):
 
 class GitHubTokenRequest(BaseModel):
     api_key: str
+
+class GitHubRepositoriesRequest(BaseModel):
+    api_key: str
+
+class TrelloBoardsRequest(BaseModel):
+    api_key: str
+    token: Optional[str] = None
+
+class RepositoriesResponse(BaseModel):
+    repositories: List[Dict[str, Any]]
+
+class BoardsResponse(BaseModel):
+    boards: List[Dict[str, Any]]
 
 # Routes
 @router.get("/", response_model=PaginatedIntegrationsResponse)
@@ -151,7 +174,7 @@ async def get_integration(integration_id: int, db: Session = Depends(get_db)):
 @router.put("/{integration_id}", response_model=IntegrationResponse)
 async def update_integration(
     integration_id: int, 
-    integration_update: IntegrationCreate, 
+    integration_update: IntegrationUpdate, 
     db: Session = Depends(get_db)
 ):
     """Update an integration"""
@@ -161,7 +184,14 @@ async def update_integration(
         raise HTTPException(status_code=404, detail="Integration not found")
         
     # Update fields
-    for key, value in integration_update.dict(exclude_unset=True).items():
+    update_data = integration_update.dict(exclude_unset=True)
+    
+    # For config, we want to completely replace it rather than update it
+    # This ensures old fields are removed when switching integration types
+    if 'config' in update_data:
+        update_data['config'] = update_data['config']
+    
+    for key, value in update_data.items():
         setattr(db_integration, key, value)
         
     db.commit()
@@ -195,33 +225,29 @@ async def get_integration_metrics(integration_type: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.post("/github/repositories")
-async def get_github_repositories(request: GitHubTokenRequest):
-    """Fetch repositories available for a GitHub API token"""
+@router.post("/github/repositories", response_model=RepositoriesResponse)
+async def get_github_repositories(request: GitHubRepositoriesRequest):
+    """Get GitHub repositories for a user"""
     try:
-        from github import Github
-        
-        # Initialize the GitHub client with the provided token
-        github_client = Github(request.api_key)
-        
-        # Fetch repositories the user has access to
-        repos = []
-        for repo in github_client.get_user().get_repos():
-            repos.append({
-                "id": repo.full_name,
-                "name": repo.full_name,
-                "description": repo.description,
-                "private": repo.private,
-                "url": repo.html_url
-            })
-        
-        return {"repositories": repos}
+        client = GitHubIntegration(api_token=request.api_key)
+        repositories = client.get_repositories()
+        return {"repositories": repositories}
     except Exception as e:
-        print(f"Error fetching GitHub repositories: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to fetch repositories: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/trello/boards", response_model=BoardsResponse)
+async def get_trello_boards(request: TrelloBoardsRequest):
+    """Get Trello boards for a user"""
+    try:
+        # Create TrelloIntegration instance with both API key and token
+        client = TrelloIntegration(api_key=request.api_key, token=request.token)
+        boards_df = client.get_boards()
+        # Convert DataFrame to list of dictionaries
+        boards = boards_df.to_dict('records') if not boards_df.empty else []
+        return {"boards": boards}
+    except Exception as e:
+        print(f"Error fetching Trello boards: {str(e)}")  # Add logging
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/{integration_id}/metrics", response_model=MetricsResponse)
 async def get_metrics(
@@ -277,7 +303,7 @@ async def get_metrics(
             "server": integration.api_url,
             "username": integration.username,
             "repository": integration.config.get("repository") if integration.config else None,
-            "api_key": integration.config.get("api_key") if integration.config else None,
+            "api_key": integration.api_key if integration.type == "trello" else (integration.config.get("api_key") if integration.config else None),
             "api_secret": integration.config.get("api_secret") if integration.config else None,
             "token": integration.config.get("token") if integration.config else None
         }
@@ -299,6 +325,26 @@ async def get_metrics(
         # Get metrics
         try:
             metrics = IntegrationFactory.get_metrics(integration_instance, metrics_config)
+            
+            # Store metrics in database
+            # Store each metric
+            for metric_name, metric_value in metrics.items():
+                if isinstance(metric_value, (int, float)):
+                    # Create a new metric record
+                    metric = Metric(
+                        name=metric_name,
+                        category=integration.type,  # Use integration type as category
+                        value=float(metric_value),
+                        raw_data=metrics,  # Store all metrics as raw data
+                        team_id=integration.team_id,
+                        project_id=integration.project_id
+                    )
+                    db.add(metric)
+            
+            # Update last sync in DB
+            integration.last_sync = func.now()
+            db.commit()
+            
         except ValueError as ve:
             # Handle validation errors in a user-friendly way
             return {
@@ -333,10 +379,6 @@ async def get_metrics(
                     "error": "Failed to retrieve metrics. Please check your integration configuration."
                 }
             }
-        
-        # Update last sync in DB
-        integration.last_sync = func.now()
-        db.commit()
         
         return {
             "integration_id": integration.id,

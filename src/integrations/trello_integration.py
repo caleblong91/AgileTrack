@@ -1,5 +1,5 @@
 import os
-from trello import TrelloClient
+import requests
 from datetime import datetime, timedelta
 import pandas as pd
 from .cache import redis_cache # Import the decorator
@@ -7,78 +7,115 @@ from .cache import redis_cache # Import the decorator
 class TrelloIntegration:
     def __init__(self, api_key=None, api_secret=None, token=None):
         self.api_key = api_key or os.getenv("TRELLO_API_KEY")
-        self.api_secret = api_secret or os.getenv("TRELLO_API_SECRET")
         self.token = token or os.getenv("TRELLO_TOKEN")
         
-        self.client = TrelloClient(
-            api_key=self.api_key,
-            api_secret=self.api_secret,
-            token=self.token
-        )
+        if not self.api_key or not self.token:
+            raise ValueError("Both API key and token are required for Trello integration")
+        
+        # Base URL for Trello API
+        self.base_url = "https://api.trello.com/1"
         
     def get_boards(self):
         """Get all Trello boards"""
-        boards = self.client.list_boards()
-        
-        return pd.DataFrame([{
-            "id": board.id,
-            "name": board.name,
-            "description": board.description,
-            "closed": board.closed,
-            "url": board.url
-        } for board in boards])
+        try:
+            # Make direct API call to Trello
+            url = f"{self.base_url}/members/me/boards"
+            params = {
+                'key': self.api_key,
+                'token': self.token,
+                'filter': 'all'
+            }
+            
+            response = requests.get(url, params=params)
+            response.raise_for_status()  # Raise an exception for bad status codes
+            
+            boards = response.json()
+            return pd.DataFrame([{
+                "id": board['id'],
+                "name": board['name'],
+                "description": board.get('desc', ''),
+                "closed": board.get('closed', False),
+                "url": board.get('url', '')
+            } for board in boards])
+        except requests.exceptions.RequestException as e:
+            print(f"Error in get_boards: {str(e)}")
+            if hasattr(e.response, 'text'):
+                print(f"Response text: {e.response.text}")
+            raise ValueError(f"Failed to fetch Trello boards: {str(e)}")
     
     def get_lists(self, board_id):
         """Get lists from a board"""
-        board = self.client.get_board(board_id)
-        lists = board.list_lists()
-        
-        return pd.DataFrame([{
-            "id": lst.id,
-            "name": lst.name,
-            "closed": lst.closed,
-            "pos": lst.pos
-        } for lst in lists])
+        try:
+            url = f"{self.base_url}/boards/{board_id}/lists"
+            params = {
+                'key': self.api_key,
+                'token': self.token
+            }
+            
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            
+            lists = response.json()
+            return pd.DataFrame([{
+                "id": lst['id'],
+                "name": lst['name'],
+                "closed": lst.get('closed', False),
+                "pos": lst.get('pos', 0)
+            } for lst in lists])
+        except requests.exceptions.RequestException as e:
+            print(f"Error in get_lists: {str(e)}")
+            if hasattr(e.response, 'text'):
+                print(f"Response text: {e.response.text}")
+            raise ValueError(f"Failed to fetch Trello lists: {str(e)}")
     
     def get_cards(self, board_id, days=30):
         """Get cards from a board"""
-        board = self.client.get_board(board_id)
-        lists = board.list_lists()
-        since = datetime.now() - timedelta(days=days)
-        
-        card_data = []
-        for lst in lists:
-            cards = lst.list_cards()
+        try:
+            url = f"{self.base_url}/boards/{board_id}/cards"
+            params = {
+                'key': self.api_key,
+                'token': self.token,
+                'members': 'true',
+                'checklists': 'true'
+            }
+            
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            
+            cards = response.json()
+            since = datetime.now() - timedelta(days=days)
+            
+            card_data = []
             for card in cards:
                 # Try to filter by creation date
                 try:
-                    created_date = card.created_date
-                    if created_date and created_date < since:
+                    created_date = datetime.fromisoformat(card['dateLastActivity'].replace('Z', '+00:00'))
+                    if created_date < since:
                         continue
                 except:
                     pass  # If we can't get creation date, include the card
                 
                 # Get card details
                 card_dict = {
-                    "id": card.id,
-                    "name": card.name,
-                    "description": card.description,
-                    "list_name": lst.name,
-                    "labels": [label.name for label in card.labels],
-                    "due": card.due_date,
-                    "closed": card.closed,
-                    "url": card.url,
-                    "members": [member.full_name for member in card.member_id]
+                    "id": card['id'],
+                    "name": card['name'],
+                    "description": card.get('desc', ''),
+                    "list_name": card.get('list', {}).get('name', ''),
+                    "labels": [label['name'] for label in card.get('labels', [])],
+                    "due": card.get('due'),
+                    "closed": card.get('closed', False),
+                    "url": card.get('url', ''),
+                    "members": [member['fullName'] for member in card.get('members', [])]
                 }
                 
                 # Get checklist completion
-                if card.checklists:
+                if card.get('checklists'):
                     total_items = 0
                     checked_items = 0
                     
-                    for checklist in card.checklists:
-                        total_items += len(checklist.items)
-                        checked_items += len([item for item in checklist.items if item["checked"]])
+                    for checklist in card['checklists']:
+                        total_items += len(checklist.get('checkItems', []))
+                        checked_items += len([item for item in checklist.get('checkItems', []) if item.get('state') == 'complete'])
                     
                     card_dict["checklist_completion"] = checked_items / total_items if total_items > 0 else None
                 else:
@@ -86,7 +123,12 @@ class TrelloIntegration:
                     
                 card_data.append(card_dict)
                 
-        return pd.DataFrame(card_data)
+            return pd.DataFrame(card_data)
+        except requests.exceptions.RequestException as e:
+            print(f"Error in get_cards: {str(e)}")
+            if hasattr(e.response, 'text'):
+                print(f"Response text: {e.response.text}")
+            raise ValueError(f"Failed to fetch Trello cards: {str(e)}")
     
     @redis_cache(ttl_seconds=1800) # Cache for 30 minutes
     def calculate_metrics(self, board_id, days=30):

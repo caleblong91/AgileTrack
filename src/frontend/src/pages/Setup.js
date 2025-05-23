@@ -20,12 +20,15 @@ const Setup = () => {
     type: 'github',
     apiKey: '',
     name: '',
-    repository: ''
+    repository: '',
+    board: ''
   });
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [error, setError] = useState('');
   const [repositories, setRepositories] = useState([]);
   const [fetchingRepos, setFetchingRepos] = useState(false);
+  const [trelloBoards, setTrelloBoards] = useState([]);
+  const [fetchingBoards, setFetchingBoards] = useState(false);
   
   // Fetch latest user status from the API on component mount
   useEffect(() => {
@@ -75,11 +78,15 @@ const Setup = () => {
     }
   }, [currentUser, setupComplete, hasIntegration, navigate]);
 
-  // Add effect to fetch repositories when a valid GitHub API key is entered
+  // Add effect to fetch repositories or boards when a valid API key is entered
   useEffect(() => {
-    // Only fetch when GitHub integration is selected and API key is long enough
-    if (integration.type === 'github' && integration.apiKey && integration.apiKey.length > 20) {
-      fetchGitHubRepositories(integration.apiKey);
+    // Only fetch when API key is long enough
+    if (integration.apiKey && integration.apiKey.length > 20) {
+      if (integration.type === 'github') {
+        fetchGitHubRepositories(integration.apiKey);
+      } else if (integration.type === 'trello') {
+        fetchTrelloBoards(integration.apiKey);
+      }
     }
   }, [integration.type, integration.apiKey]);
 
@@ -105,6 +112,31 @@ const Setup = () => {
       setRepositories([]);
     } finally {
       setFetchingRepos(false);
+    }
+  };
+
+  // Function to fetch Trello boards
+  const fetchTrelloBoards = async (apiKey) => {
+    setFetchingBoards(true);
+    setError(''); // Clear any previous errors
+    
+    try {
+      console.log('Fetching Trello boards with API key length:', apiKey.length);
+      const response = await api.post('/integrations/trello/boards', { api_key: apiKey });
+      
+      if (response.data && response.data.boards) {
+        console.log(`Found ${response.data.boards.length} boards`);
+        setTrelloBoards(response.data.boards);
+      } else {
+        console.log('No boards found in response:', response.data);
+        setTrelloBoards([]);
+      }
+    } catch (error) {
+      console.error('Error fetching boards:', error);
+      setError('Failed to fetch boards: ' + (error.response?.data?.detail || 'Please check your API key'));
+      setTrelloBoards([]);
+    } finally {
+      setFetchingBoards(false);
     }
   };
 
@@ -158,6 +190,7 @@ const Setup = () => {
         type: integration.type,
         name: integration.name,
         repository: integration.repository,
+        board: integration.board,
         teamId: teamId
       });
       
@@ -167,9 +200,14 @@ const Setup = () => {
         name: integration.name,
         apiKey: integration.apiKey,
         repository: integration.repository,
+        board: integration.board,
         project_id: teamId, // Use the team ID as project_id
         team_id: teamId,    // Also include team_id
-        config: integration.type === 'github' ? { repository: integration.repository } : {}
+        config: integration.type === 'github' ? 
+          { repository: integration.repository } : 
+          integration.type === 'trello' ? 
+            { board_id: integration.board } : 
+            {}
       });
       
       // Redirect to dashboard
@@ -230,19 +268,49 @@ const Setup = () => {
       case 'trello':
         return (
           <>
-            <h5>How to get your Trello API Key:</h5>
+            <h5>How to set up Trello Integration:</h5>
             <ol className="mt-3">
-              <li>Log in to your Trello account</li>
-              <li>Visit the <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">Trello API Key Generation page</a></li>
-              <li>Copy the <b>API Key</b> shown at the top</li>
-              <li>Below the API Key, click the link to <b>generate a Token</b></li>
-              <li>Click <b>Allow</b> to grant access</li>
-              <li>Copy the <b>Token</b> shown</li>
-              <li>Combine your API Key and Token with a colon (<code>key:token</code>) and paste in the field</li>
+              <li>
+                <strong>Get your API Key:</strong>
+                <ol>
+                  <li>Log in to your Trello account</li>
+                  <li>Visit the <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">Trello API Key Generation page</a></li>
+                  <li>Copy the <b>API Key</b> shown at the top</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Generate a Token:</strong>
+                <ol>
+                  <li>On the same page, scroll down to the "Token" section</li>
+                  <li>Click the link to <b>generate a Token</b></li>
+                  <li>Click <b>Allow</b> to grant access to your Trello account</li>
+                  <li>Copy the <b>Token</b> shown</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Combine the Key and Token:</strong>
+                <ol>
+                  <li>Format: <code>your_api_key:your_token</code></li>
+                  <li>Example: <code>1234567890abcdef:abcdef1234567890</code></li>
+                  <li>Paste this combined string in the API Key field</li>
+                </ol>
+              </li>
+              <li>
+                <strong>Board Access:</strong>
+                <ol>
+                  <li>Make sure to grant access to the boards you want to track</li>
+                  <li>You can manage board access in your Trello account settings</li>
+                  <li>The boards you have access to will appear in the dropdown after entering your API key</li>
+                </ol>
+              </li>
             </ol>
+            <div className="alert alert-info mt-3">
+              <i className="fe fe-info me-2"></i>
+              <strong>Note:</strong> The token grants access to your Trello account, so keep it secure. You can revoke access at any time from your Trello account settings.
+            </div>
             <div className="alert alert-warning mt-3">
               <i className="fe fe-alert-triangle me-2"></i>
-              Ensure you're granting access to the right Trello boards when generating your token.
+              <strong>Important:</strong> Make sure you have the necessary permissions on the Trello boards you want to track. You need at least "Read" access to view board data.
             </div>
           </>
         );
@@ -467,6 +535,44 @@ const Setup = () => {
                       )}
                     </div>
                   )}
+
+                  {/* Board Selection Dropdown - Only show for Trello when boards are loaded */}
+                  {integration.type === 'trello' && (
+                    <div className="mb-3">
+                      <label htmlFor="board" className="form-label">Board</label>
+                      {fetchingBoards ? (
+                        <div className="d-flex align-items-center">
+                          <div className="spinner-border spinner-border-sm text-primary me-2" role="status">
+                            <span className="visually-hidden">Loading...</span>
+                          </div>
+                          <span>Loading boards...</span>
+                        </div>
+                      ) : trelloBoards.length > 0 ? (
+                        <select
+                          id="board"
+                          className="form-select"
+                          value={integration.board}
+                          onChange={(e) => setIntegration({...integration, board: e.target.value})}
+                          required
+                        >
+                          <option value="">Select a board</option>
+                          {trelloBoards.map(board => (
+                            <option key={board.id} value={board.id}>
+                              {board.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : integration.apiKey && integration.apiKey.length > 10 ? (
+                        <div className="alert alert-warning">
+                          No boards found or API key is invalid. Please check your API key and try again.
+                        </div>
+                      ) : (
+                        <div className="form-text text-muted">
+                          Enter a valid Trello API key above to load your boards.
+                        </div>
+                      )}
+                    </div>
+                  )}
                   
                   <div className="d-flex justify-content-between">
                     <button 
@@ -479,7 +585,9 @@ const Setup = () => {
                     <button 
                       type="submit" 
                       className="btn btn-primary"
-                      disabled={loading || (integration.type === 'github' && !integration.repository)}
+                      disabled={loading || 
+                        (integration.type === 'github' && !integration.repository) ||
+                        (integration.type === 'trello' && !integration.board)}
                     >
                       {loading ? 'Connecting...' : 'Complete Setup'}
                     </button>

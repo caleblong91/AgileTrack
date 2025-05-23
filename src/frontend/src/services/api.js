@@ -28,10 +28,27 @@ api.interceptors.request.use(
 // Add a response interceptor to handle auth errors
 api.interceptors.response.use(
   (response) => {
+    // Log response data for debugging
+    if (response.config.url.includes('/integrations')) {
+      console.log('Integrations API Response:', {
+        url: response.config.url,
+        method: response.config.method,
+        data: response.data
+      });
+    }
     return response;
   },
   async (error) => {
     const originalRequest = error.config;
+    
+    // Log error details for debugging
+    if (originalRequest.url.includes('/integrations')) {
+      console.error('Integrations API Error:', {
+        url: originalRequest.url,
+        method: originalRequest.method,
+        error: error.response?.data || error.message
+      });
+    }
     
     // If the error is a 401 and we haven't retried already
     if (error.response && error.response.status === 401 && !originalRequest._retry) {
